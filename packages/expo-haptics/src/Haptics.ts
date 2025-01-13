@@ -1,7 +1,7 @@
-import { UnavailabilityError } from 'expo-modules-core';
+import { Platform, UnavailabilityError } from 'expo-modules-core';
 
 import ExpoHaptics from './ExpoHaptics';
-import { NotificationFeedbackType, ImpactFeedbackStyle } from './Haptics.types';
+import { NotificationFeedbackType, ImpactFeedbackStyle, AndroidHaptics } from './Haptics.types';
 
 // @needsAudit
 /**
@@ -14,7 +14,7 @@ import { NotificationFeedbackType, ImpactFeedbackStyle } from './Haptics.types';
 export async function notificationAsync(
   type: NotificationFeedbackType = NotificationFeedbackType.Success
 ): Promise<void> {
-  if (!ExpoHaptics.notificationAsync) {
+  if (!ExpoHaptics?.notificationAsync) {
     throw new UnavailabilityError('Haptics', 'notificationAsync');
   }
   await ExpoHaptics.notificationAsync(type);
@@ -30,7 +30,7 @@ export async function notificationAsync(
 export async function impactAsync(
   style: ImpactFeedbackStyle = ImpactFeedbackStyle.Medium
 ): Promise<void> {
-  if (!ExpoHaptics.impactAsync) {
+  if (!ExpoHaptics?.impactAsync) {
     throw new UnavailabilityError('Haptic', 'impactAsync');
   }
   await ExpoHaptics.impactAsync(style);
@@ -42,10 +42,22 @@ export async function impactAsync(
  * @return A `Promise` which fulfils once native size haptics functionality is triggered.
  */
 export async function selectionAsync(): Promise<void> {
-  if (!ExpoHaptics.selectionAsync) {
+  if (!ExpoHaptics?.selectionAsync) {
     throw new UnavailabilityError('Haptic', 'selectionAsync');
   }
   await ExpoHaptics.selectionAsync();
 }
 
-export { NotificationFeedbackType, ImpactFeedbackStyle };
+/**
+ * Use the device haptics engine to provide physical feedback to the user.
+ *
+ * @platform android
+ */
+export async function performAndroidHapticsAsync(type: AndroidHaptics) {
+  if (Platform.OS !== 'android') {
+    return;
+  }
+  ExpoHaptics.performHapticsAsync(type);
+}
+
+export { NotificationFeedbackType, ImpactFeedbackStyle, AndroidHaptics };

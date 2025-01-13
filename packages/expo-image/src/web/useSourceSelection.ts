@@ -1,6 +1,8 @@
-import React, { useState, useRef } from 'react';
+import type { SharedRef as SharedRefType } from 'expo/types';
+import React, { useState } from 'react';
 
 import { ImageProps, ImageSource } from '../Image.types';
+import { isImageRef } from '../utils';
 import { isBlurhashString, isThumbhashString } from '../utils/resolveSources';
 
 function findBestSourceForSize(
@@ -57,6 +59,10 @@ function selectSource(
     return null;
   }
 
+  if (sources.length === 1) {
+    return sources[0];
+  }
+
   if (responsivePolicy !== 'static') {
     return findBestSourceForSize(sources, size);
   }
@@ -78,9 +84,9 @@ function selectSource(
   const srcset = staticSupportedSources
     ?.map((source) => `${source.uri} ${source.width}w`)
     .join(', ');
-  const sizes = `${staticSupportedSources?.map(getCSSMediaQueryForSource).join(', ')}, ${
-    staticSupportedSources[staticSupportedSources.length - 1]?.width
-  }px`;
+  const sizes = `${staticSupportedSources
+    ?.map(getCSSMediaQueryForSource)
+    .join(', ')}, ${staticSupportedSources[staticSupportedSources.length - 1]?.width}px`;
   return {
     srcset,
     sizes,
@@ -89,59 +95,40 @@ function selectSource(
   };
 }
 
-type UseSourceSelectionReturn = {
-  containerRef: (element: HTMLDivElement) => void;
-  source: ImageSource | SrcSetSource | null;
-};
-
 export default function useSourceSelection(
-  sources?: ImageSource[],
+  sources: ImageSource[] | SharedRefType<'image'> | undefined,
   responsivePolicy: ImageProps['responsivePolicy'] = 'static',
-  measurementCallback?: (target: HTMLElement, size: DOMRect) => void
-): UseSourceSelectionReturn {
-  const hasMoreThanOneSource = (sources?.length ?? 0) > 1;
-  // null - not calculated yet, DOMRect - size available
-  const [size, setSize] = useState<null | DOMRect>(null);
-  const resizeObserver = useRef<ResizeObserver | null>(null);
+  containerRef: React.MutableRefObject<HTMLDivElement | null>,
+  measurementCallback: ((target: HTMLElement, size: DOMRect) => void) | null = null
+): ImageSource | SrcSetSource | SharedRefType<'image'> | null {
+  const hasMoreThanOneSource = (Array.isArray(sources) ? sources.length : 0) > 1;
+  const [size, setSize] = useState<null | DOMRect>(
+    containerRef.current?.getBoundingClientRect() ?? null
+  );
+  if (size && containerRef.current) {
+    measurementCallback?.(containerRef.current, size);
+  }
 
   React.useEffect(() => {
-    return () => {
-      resizeObserver.current?.disconnect();
-    };
-  }, []);
+    if ((!hasMoreThanOneSource && !measurementCallback) || !containerRef.current) {
+      return () => {};
+    }
+    if (responsivePolicy === 'live') {
+      const resizeObserver = new ResizeObserver((entries) => {
+        setSize(entries[0].contentRect);
+        measurementCallback?.(entries[0].target as any, entries[0].contentRect);
+      });
+      resizeObserver.observe(containerRef.current);
+      return () => {
+        resizeObserver.disconnect();
+      };
+    }
+    return () => {};
+  }, [responsivePolicy, hasMoreThanOneSource, containerRef.current, measurementCallback]);
 
-  const containerRef = React.useCallback(
-    (element: HTMLDivElement) => {
-      // we can't short circuit here since we need to read the size for better animated transitions
-      if (!hasMoreThanOneSource && !measurementCallback) {
-        return;
-      }
-      const rect = element?.getBoundingClientRect();
-      measurementCallback?.(element, rect);
-      setSize(rect);
-
-      if (responsivePolicy === 'live') {
-        resizeObserver.current?.disconnect();
-        if (!element) {
-          return;
-        }
-        resizeObserver.current = new ResizeObserver((entries) => {
-          setSize(entries[0].contentRect);
-          measurementCallback?.(entries[0].target as any, entries[0].contentRect);
-        });
-        resizeObserver.current.observe(element);
-      }
-    },
-    [hasMoreThanOneSource, responsivePolicy]
-  );
-
-  const source = selectSource(sources, size, responsivePolicy);
-
-  return React.useMemo(
-    () => ({
-      containerRef,
-      source,
-    }),
-    [source]
-  );
+  if (isImageRef(sources)) {
+    // There is always only one image ref, so there is nothing else to select from.
+    return sources;
+  }
+  return selectSource(sources, size, responsivePolicy);
 }

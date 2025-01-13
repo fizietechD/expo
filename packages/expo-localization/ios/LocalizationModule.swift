@@ -23,8 +23,12 @@ public class LocalizationModule: Module {
       return Self.getCalendars()
     }
     OnCreate {
-      if let enableRTL = Bundle.main.object(forInfoDictionaryKey: "ExpoLocalization_supportsRTL") as? Bool {
-        self.setSupportsRTL(enableRTL)
+      if let forceRTL = Bundle.main.object(forInfoDictionaryKey: "ExpoLocalization_forcesRTL") as? Bool {
+        self.setRTLPreferences(true, forceRTL)
+      } else {
+        if let enableRTL = Bundle.main.object(forInfoDictionaryKey: "ExpoLocalization_supportsRTL") as? Bool {
+          self.setRTLPreferences(enableRTL, false)
+        }
       }
     }
 
@@ -53,12 +57,20 @@ public class LocalizationModule: Module {
     return NSLocale.characterDirection(forLanguage: NSLocale.preferredLanguages.first ?? "en-US") == NSLocale.LanguageDirection.rightToLeft
   }
 
-  func setSupportsRTL(_ supportsRTL: Bool) {
+  func setRTLPreferences(_ supportsRTL: Bool, _ forceRTL: Bool) {
     // These keys are used by React Native here: https://github.com/facebook/react-native/blob/main/React/Modules/RCTI18nUtil.m
     // We set them before React loads to ensure it gets rendered correctly the first time the app is opened.
     // On iOS we need to set both forceRTL and allowRTL so apps don't have to include localization strings.
-    UserDefaults.standard.set(supportsRTL, forKey: "RCTI18nUtil_allowRTL")
-    UserDefaults.standard.set(supportsRTL ? isRTLPreferredForCurrentLocale() : false, forKey: "RCTI18nUtil_forceRTL")
+    // Uses required reason API based on the following reason: CA92.1
+
+    if forceRTL {
+      UserDefaults.standard.set(true, forKey: "RCTI18nUtil_allowRTL")
+      UserDefaults.standard.set(true, forKey: "RCTI18nUtil_forceRTL")
+    } else {
+      UserDefaults.standard.set(supportsRTL, forKey: "RCTI18nUtil_allowRTL")
+      UserDefaults.standard.set(supportsRTL ? isRTLPreferredForCurrentLocale() : false, forKey: "RCTI18nUtil_forceRTL")
+    }
+
     UserDefaults.standard.synchronize()
   }
 
@@ -115,7 +127,7 @@ public class LocalizationModule: Module {
   }
 
   static func getMeasurementSystemForLocale(_ locale: Locale) -> String {
-    if #available(iOS 16, *) {
+    if #available(iOS 16, tvOS 16, *) {
       let measurementSystems = [
         Locale.MeasurementSystem.us: "us",
         Locale.MeasurementSystem.uk: "uk",
@@ -133,16 +145,37 @@ public class LocalizationModule: Module {
       .map { languageTag -> [String: Any?] in
         let languageLocale = Locale.init(identifier: languageTag)
 
+        if #available(iOS 16, tvOS 16, *) {
+          return [
+            "languageTag": languageTag,
+            "languageCode": languageLocale.language.languageCode?.identifier,
+            "languageRegionCode": languageLocale.region?.identifier,
+            "regionCode": userSettingsLocale.region?.identifier,
+            "textDirection": languageLocale.language.characterDirection == .rightToLeft ? "rtl" : "ltr",
+            "decimalSeparator": userSettingsLocale.decimalSeparator,
+            "digitGroupingSeparator": userSettingsLocale.groupingSeparator,
+            "measurementSystem": getMeasurementSystemForLocale(userSettingsLocale),
+            "currencyCode": userSettingsLocale.currencyCode,
+            "currencySymbol": userSettingsLocale.currencySymbol,
+            "languageCurrencyCode": languageLocale.currencyCode,
+            "languageCurrencySymbol": languageLocale.currencySymbol,
+            "temperatureUnit": getTemperatureUnit()
+          ]
+        }
         return [
           "languageTag": languageTag,
           "languageCode": languageLocale.languageCode,
-          "regionCode": languageLocale.regionCode,
+          "languageRegionCode": languageLocale.regionCode,
+          "regionCode": userSettingsLocale.regionCode,
           "textDirection": Locale.characterDirection(forLanguage: languageTag) == .rightToLeft ? "rtl" : "ltr",
           "decimalSeparator": userSettingsLocale.decimalSeparator,
           "digitGroupingSeparator": userSettingsLocale.groupingSeparator,
           "measurementSystem": getMeasurementSystemForLocale(userSettingsLocale),
-          "currencyCode": languageLocale.currencyCode,
-          "currencySymbol": languageLocale.currencySymbol
+          "currencyCode": userSettingsLocale.currencyCode,
+          "currencySymbol": userSettingsLocale.currencySymbol,
+          "languageCurrencyCode": languageLocale.currencyCode,
+          "languageCurrencySymbol": languageLocale.currencySymbol,
+          "temperatureUnit": getTemperatureUnit()
         ]
       }
   }
@@ -154,6 +187,20 @@ public class LocalizationModule: Module {
     sendEvent(CALENDAR_SETTINGS_CHANGED)
   }
 
+  static func getTemperatureUnit() -> String? {
+    let formatter = MeasurementFormatter()
+    formatter.locale = Locale.current
+
+    let temperature = Measurement(value: 0, unit: UnitTemperature.celsius)
+    let formatted = formatter.string(from: temperature)
+
+    guard let unitCharacter = formatted.last else {
+      return nil
+    }
+
+    return unitCharacter == "F" ? "fahrenheit" : "celsius"
+  }
+
   // https://stackoverflow.com/a/28183182
   static func uses24HourClock() -> Bool {
     let dateFormat = DateFormatter.dateFormat(fromTemplate: "j", options: 0, locale: Locale.current)!
@@ -162,7 +209,7 @@ public class LocalizationModule: Module {
   }
 
   static func getCalendars() -> [[String: Any?]] {
-    var calendar = Locale.current.calendar
+    let calendar = Locale.current.calendar
     return [
       [
         "calendar": getUnicodeCalendarIdentifier(calendar: calendar),

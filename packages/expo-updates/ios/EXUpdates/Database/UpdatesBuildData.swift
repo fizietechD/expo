@@ -18,7 +18,6 @@ import Foundation
  * the updates cache rarely) and likely to
  * cause bugs when they do. The tracked fields are:
  *
- *   EXUpdatesReleaseChannel
  *   EXUpdatesURL
  *
  * and all of the values in json
@@ -26,21 +25,15 @@ import Foundation
  *   EXUpdatesRequestHeaders
  */
 internal final class UpdatesBuildData {
-  static func ensureBuildDataIsConsistentAsync(database: UpdatesDatabase, config: UpdatesConfig) {
+  static func ensureBuildDataIsConsistentAsync(database: UpdatesDatabase, config: UpdatesConfig, logger: UpdatesLogger) {
     database.databaseQueue.async {
-      guard let scopeKey = config.scopeKey else {
-        NSException(
-          name: .internalInconsistencyException,
-          reason: "expo-updates was configured with no scope key. Make sure a valid URL is configured under EXUpdatesURL."
-        ).raise()
-        return
-      }
+      let scopeKey = config.scopeKey
 
       let staticBuildData: [AnyHashable: Any]?
       do {
         staticBuildData = try database.staticBuildData(withScopeKey: scopeKey)
       } catch {
-        NSLog("Error getting static build data: %@", [error.localizedDescription])
+        logger.warn(message: "Error getting static build data: \(error.localizedDescription)")
         return
       }
 
@@ -49,13 +42,13 @@ internal final class UpdatesBuildData {
         // safest dictionary comparison conversion is still in objective-c
         // swiftlint:disable:next legacy_objc_type
         if !NSDictionary(dictionary: staticBuildData).isEqual(to: impliedStaticBuildData) {
-          clearAllUpdatesAndSetStaticBuildData(database: database, config: config, scopeKey: scopeKey)
+          clearAllUpdatesAndSetStaticBuildData(database: database, config: config, logger: logger, scopeKey: scopeKey)
         }
       } else {
         do {
           try database.setStaticBuildData(getBuildDataFromConfig(config), withScopeKey: scopeKey)
         } catch {
-          NSLog("Error setting static build data: %@", [error.localizedDescription])
+          logger.warn(message: "Error setting static build data: \(error.localizedDescription)")
           return
         }
       }
@@ -64,32 +57,31 @@ internal final class UpdatesBuildData {
 
   static func getBuildDataFromConfig(_ config: UpdatesConfig) -> [String: Any] {
     return [
-      "EXUpdatesURL": config.updateUrl.require("Must supply updateUrl in config").absoluteString,
-      "EXUpdatesReleaseChannel": config.releaseChannel,
+      "EXUpdatesURL": config.updateUrl.absoluteString,
       "EXUpdatesRequestHeaders": config.requestHeaders
     ]
   }
 
-  static func clearAllUpdatesAndSetStaticBuildData(database: UpdatesDatabase, config: UpdatesConfig, scopeKey: String) {
+  static func clearAllUpdatesAndSetStaticBuildData(database: UpdatesDatabase, config: UpdatesConfig, logger: UpdatesLogger, scopeKey: String) {
     let allUpdates: [Update]
     do {
       allUpdates = try database.allUpdates(withConfig: config)
     } catch {
-      NSLog("Error loading updates from database: %@", [error.localizedDescription])
+      logger.warn(message: "Error loading updates from database: \(error.localizedDescription)")
       return
     }
 
     do {
       try database.deleteUpdates(allUpdates)
     } catch {
-      NSLog("Error clearing all updates from database: %@", [error.localizedDescription])
+      logger.warn(message: "Error clearing all updates from database: \(error.localizedDescription)")
       return
     }
 
     do {
       try database.setStaticBuildData(getBuildDataFromConfig(config), withScopeKey: scopeKey)
     } catch {
-      NSLog("Error setting static build data: %@", [error.localizedDescription])
+      logger.warn(message: "Error setting static build data: \(error.localizedDescription)")
       return
     }
   }

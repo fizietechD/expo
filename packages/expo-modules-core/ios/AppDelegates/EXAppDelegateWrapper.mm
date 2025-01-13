@@ -2,27 +2,25 @@
 
 #import <ExpoModulesCore/EXAppDelegateWrapper.h>
 #import <ExpoModulesCore/EXReactDelegateWrapper+Private.h>
+#import <ExpoModulesCore/EXReactRootViewFactory.h>
 #import <ExpoModulesCore/Swift.h>
+#import <ExpoModulesCore/RCTAppDelegateUmbrella.h>
 
+#import <React/RCTComponentViewFactory.h> // Allows non-umbrella since it's coming from React-RCTFabric
+#import <ReactCommon/RCTHost.h> // Allows non-umbrella because the header is not inside a clang module
 
-@interface EXAppDelegateWrapper()
-
-@property (nonatomic, strong) EXReactDelegateWrapper *reactDelegate;
-
+@interface RCTAppDelegate () <RCTComponentViewFactoryComponentProvider, RCTHostDelegate>
 @end
 
 @implementation EXAppDelegateWrapper {
   EXExpoAppDelegate *_expoAppDelegate;
 }
 
-// Synthesize window, so the AppDelegate can synthesize it too.
-@synthesize window = _window;
-
 - (instancetype)init
 {
   if (self = [super init]) {
     _expoAppDelegate = [[EXExpoAppDelegate alloc] init];
-    _reactDelegate = [[EXReactDelegateWrapper alloc] initWithExpoReactDelegate:_expoAppDelegate.reactDelegate];
+    _expoAppDelegate.shouldCallReactNativeSetup = NO;
   }
   return self;
 }
@@ -32,8 +30,7 @@
 // which `UIApplicationDelegate` selectors are implemented.
 - (BOOL)respondsToSelector:(SEL)selector
 {
-  return [super respondsToSelector:selector]
-    || [_expoAppDelegate respondsToSelector:selector];
+  return [super respondsToSelector:selector] || [_expoAppDelegate respondsToSelector:selector];
 }
 
 // Forwards all invocations to `ExpoAppDelegate` object.
@@ -42,59 +39,63 @@
   return _expoAppDelegate;
 }
 
-#if __has_include(<React-RCTAppDelegate/RCTAppDelegate.h>) || __has_include(<React_RCTAppDelegate/RCTAppDelegate.h>)
+#pragma mark - RCTAppDelegate
 
-- (UIView *)findRootView:(UIApplication *)application
-{
-  UIWindow *mainWindow = application.delegate.window;
-  if (mainWindow == nil) {
-    return nil;
-  }
-  UIViewController *rootViewController = mainWindow.rootViewController;
-  if (rootViewController == nil) {
-    return nil;
-  }
-  UIView *rootView = rootViewController.view;
-  return rootView;
-}
+// Make sure to override all necessary methods from `RCTAppDelegate` here, explicitly forwarding everything to `_expoAppDelegate`.
+// `forwardingTargetForSelector` works only for methods that are not specified in this and `RCTAppDelegate` classes.
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
-  UIView *rootView = [self findRootView:application];
-  // Backward compatible with react-native 0.71 running with legacy template,
-  // i.e. still creating bridge, rootView in AppDelegate.mm.
-  // In this case, we don't go through RCTAppDelegate's setup.
-  if (rootView == nil || ![rootView isKindOfClass:[RCTRootView class]]) {
-    [super application:application didFinishLaunchingWithOptions:launchOptions];
-    [_expoAppDelegate application:application didFinishLaunchingWithOptions:launchOptions];
-  }
-  return YES;
+  [super application:application didFinishLaunchingWithOptions:launchOptions];
+  return [_expoAppDelegate application:application didFinishLaunchingWithOptions:launchOptions];
 }
 
-- (RCTBridge *)createBridgeWithDelegate:(id<RCTBridgeDelegate>)delegate launchOptions:(NSDictionary *)launchOptions
+- (void)applicationDidBecomeActive:(UIApplication *)application
 {
-  return [self.reactDelegate createBridgeWithDelegate:delegate launchOptions:launchOptions];
-}
-
-- (UIView *)createRootViewWithBridge:(RCTBridge *)bridge
-                          moduleName:(NSString *)moduleName
-                           initProps:(NSDictionary *)initProps
-{
-  BOOL enableFabric = NO;
-#if RN_FABRIC_ENABLED
-  enableFabric = self.fabricEnabled;
-#endif
-
-  return [self.reactDelegate createRootViewWithBridge:bridge
-                                         moduleName:moduleName
-                                    initialProperties:initProps
-                                        fabricEnabled:enableFabric];
+  return [_expoAppDelegate applicationDidBecomeActive:application];
 }
 
 - (UIViewController *)createRootViewController
 {
-  return [self.reactDelegate createRootViewController];
+  return [_expoAppDelegate createRootViewController];
 }
-#endif // __has_include(<React-RCTAppDelegate/RCTAppDelegate.h>)
+
+- (RCTRootViewFactory *)createRCTRootViewFactory
+{
+  return [_expoAppDelegate createRCTRootViewFactory];
+}
+
+- (void)customizeRootView:(UIView *)rootView
+{
+  [_expoAppDelegate customizeRootView:rootView];
+}
+
+#pragma mark - RCTComponentViewFactoryComponentProvider
+
+- (NSDictionary<NSString *, Class<RCTComponentViewProtocol>> *)thirdPartyFabricComponents
+{
+  return @{};
+}
+
+#pragma mark - RCTHostDelegate
+
+- (void)hostDidStart:(RCTHost *)host
+{
+}
+
+- (void)host:(RCTHost *)host
+    didReceiveJSErrorStack:(NSArray<NSDictionary<NSString *, id> *> *)stack
+                   message:(NSString *)message
+               exceptionId:(NSUInteger)exceptionId
+                   isFatal:(BOOL)isFatal
+{
+}
+
+#pragma mark - Helpers
+
++ (void)customizeRootView:(nonnull UIView *)rootView byAppDelegate:(nonnull RCTAppDelegate *)appDelegate
+{
+  [appDelegate customizeRootView:(RCTRootView *)rootView];
+}
 
 @end

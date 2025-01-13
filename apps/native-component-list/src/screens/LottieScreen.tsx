@@ -1,6 +1,6 @@
 import Slider from '@react-native-community/slider';
 import { Picker } from '@react-native-picker/picker';
-import Animation from 'lottie-react-native';
+import LottieView from 'lottie-react-native';
 import React from 'react';
 import {
   Animated,
@@ -12,6 +12,8 @@ import {
   Text,
   View,
 } from 'react-native';
+
+const AnimatedLottieView = Animated.createAnimatedComponent(LottieView);
 
 const makeExample = (name: string, getJson: () => any) => ({ name, getJson });
 const EXAMPLES = [
@@ -41,7 +43,7 @@ const ExamplePicker: React.FunctionComponent<{
 }> = ({ value, onChange }) => (
   <Picker selectedValue={value} onValueChange={onChange} style={styles.examplePicker}>
     {Object.values(EXAMPLES).map(({ name }) => (
-      <Picker.Item key={name} label={name} value={name} />
+      <Picker.Item key={name} label={name} value={name} color="black" />
     ))}
   </Picker>
 );
@@ -113,9 +115,7 @@ interface State {
   config: Config;
 }
 
-// See: https://github.com/expo/expo/pull/10229#discussion_r490961694
-// eslint-disable-next-line @typescript-eslint/ban-types
-export default class LottieScreen extends React.Component<{}, State> {
+export default class LottieScreen extends React.Component<object, State> {
   static navigationOptions = {
     title: '<Lottie />',
   };
@@ -176,7 +176,7 @@ export default class LottieScreen extends React.Component<{}, State> {
         />
         <View style={styles.animationContainer}>
           <View key={this.state.exampleName}>
-            <Animation
+            <AnimatedLottieView
               ref={this.setAnim}
               style={styles.animation}
               source={EXAMPLES[this.state.exampleName].getJson()}

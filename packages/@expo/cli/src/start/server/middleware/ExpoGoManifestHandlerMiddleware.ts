@@ -5,9 +5,12 @@ import crypto from 'crypto';
 import FormData from 'form-data';
 import { serializeDictionary, Dictionary } from 'structured-headers';
 
-import UserSettings from '../../../api/user/UserSettings';
+import { ManifestMiddleware, ManifestRequestInfo } from './ManifestMiddleware';
+import { assertRuntimePlatform, parsePlatformHeader } from './resolvePlatform';
+import { resolveRuntimeVersionWithExpoUpdatesAsync } from './resolveRuntimeVersionWithExpoUpdatesAsync';
+import { ServerHeaders, ServerRequest } from './server.types';
+import { getAnonymousIdAsync } from '../../../api/user/UserSettings';
 import { ANONYMOUS_USERNAME } from '../../../api/user/user';
-import { logEventAsync } from '../../../utils/analytics/rudderstackClient';
 import {
   CodeSigningInfo,
   getCodeSigningInfoAsync,
@@ -15,9 +18,6 @@ import {
 } from '../../../utils/codesigning';
 import { CommandError } from '../../../utils/errors';
 import { stripPort } from '../../../utils/url';
-import { ManifestMiddleware, ManifestRequestInfo } from './ManifestMiddleware';
-import { assertRuntimePlatform, parsePlatformHeader } from './resolvePlatform';
-import { ServerHeaders, ServerRequest } from './server.types';
 
 const debug = require('debug')('expo:start:server:middleware:ExpoGoManifestHandlerMiddleware');
 
@@ -82,6 +82,7 @@ export class ExpoGoManifestHandlerMiddleware extends ManifestMiddleware<ExpoGoMa
       platform,
       expectSignature: expectSignature ? String(expectSignature) : null,
       hostname: stripPort(req.headers['host']),
+      protocol: req.headers['x-forwarded-proto'] as 'http' | 'https' | undefined,
     };
   }
 
@@ -99,14 +100,22 @@ export class ExpoGoManifestHandlerMiddleware extends ManifestMiddleware<ExpoGoMa
     version: string;
     headers: ServerHeaders;
   }> {
-    const { exp, hostUri, expoGoConfig, bundleUrl } = await this._resolveProjectSettingsAsync(
-      requestOptions
-    );
+    const { exp, hostUri, expoGoConfig, bundleUrl } =
+      await this._resolveProjectSettingsAsync(requestOptions);
 
-    const runtimeVersion = Updates.getRuntimeVersion(
-      { ...exp, runtimeVersion: exp.runtimeVersion ?? { policy: 'sdkVersion' } },
-      requestOptions.platform
-    );
+    const runtimeVersion =
+      (await resolveRuntimeVersionWithExpoUpdatesAsync({
+        projectRoot: this.projectRoot,
+        platform: requestOptions.platform,
+      })) ??
+      // if expo-updates can't determine runtime version, fall back to calculation from config-plugin.
+      // this happens when expo-updates is installed but runtimeVersion hasn't yet been configured or when
+      // expo-updates is not installed.
+      (await Updates.getRuntimeVersionAsync(
+        this.projectRoot,
+        { ...exp, runtimeVersion: exp.runtimeVersion ?? { policy: 'sdkVersion' } },
+        requestOptions.platform
+      ));
     if (!runtimeVersion) {
       throw new CommandError(
         'MANIFEST_MIDDLEWARE',
@@ -247,12 +256,6 @@ export class ExpoGoManifestHandlerMiddleware extends ManifestMiddleware<ExpoGoMa
     return form;
   }
 
-  protected trackManifest(version?: string) {
-    logEventAsync('Serve Expo Updates Manifest', {
-      runtimeVersion: version,
-    });
-  }
-
   private static async getScopeKeyAsync({
     slug,
     codeSigningInfo,
@@ -275,7 +278,7 @@ export class ExpoGoManifestHandlerMiddleware extends ManifestMiddleware<ExpoGoMa
 }
 
 async function getAnonymousScopeKeyAsync(slug: string): Promise<string> {
-  const userAnonymousIdentifier = await UserSettings.getAnonymousIdentifierAsync();
+  const userAnonymousIdentifier = await getAnonymousIdAsync();
   return `@${ANONYMOUS_USERNAME}/${slug}-${userAnonymousIdentifier}`;
 }
 

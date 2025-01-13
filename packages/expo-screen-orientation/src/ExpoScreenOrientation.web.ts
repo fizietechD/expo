@@ -1,4 +1,4 @@
-import { SyntheticPlatformEmitter, Platform } from 'expo-modules-core';
+import { NativeModule, Platform, registerWebModule } from 'expo-modules-core';
 
 import { getOrientationLockAsync, getOrientationAsync } from './ScreenOrientation';
 import {
@@ -6,6 +6,7 @@ import {
   OrientationLock,
   WebOrientationLock,
   WebOrientation,
+  ExpoOrientationEvents,
 } from './ScreenOrientation.types';
 
 const OrientationLockAPIToWeb: {
@@ -33,28 +34,6 @@ const OrientationWebToAPI: {
 declare const window: Window;
 
 const screen: Screen = Platform.canUseViewport ? window.screen : ({} as Screen);
-const orientation: ScreenOrientation | null = Platform.canUseViewport
-  ? screen.orientation || (screen as any).msOrientation || null
-  : null;
-
-async function emitOrientationEvent() {
-  const [orientationLock, orientation] = await Promise.all([
-    getOrientationLockAsync(),
-    getOrientationAsync(),
-  ]);
-  SyntheticPlatformEmitter.emit('expoDidUpdateDimensions', {
-    orientationLock,
-    orientationInfo: { orientation },
-  });
-}
-
-if (Platform.canUseEventListeners) {
-  if (orientation && orientation.addEventListener) {
-    orientation.addEventListener('change', emitOrientationEvent);
-  } else {
-    window.addEventListener('orientationchange', emitOrientationEvent);
-  }
-}
 
 function _convertToLegacyOrientationLock(orientationLock: WebOrientationLock): string | string[] {
   switch (orientationLock) {
@@ -77,7 +56,9 @@ async function _lockAsync(webOrientationLock: WebOrientationLock): Promise<void>
       `expo-screen-orientation: WebOrientationLock.UNKNOWN is not a valid lock that can be applied to the device.`
     );
   }
+  // @ts-ignore-error: This is missing in the TypeScript definitions
   if (screen.orientation && screen.orientation.lock) {
+    // @ts-ignore-error
     await screen.orientation.lock(webOrientationLock);
   } else if (
     screen['lockOrientation'] ||
@@ -103,16 +84,45 @@ async function _lockAsync(webOrientationLock: WebOrientationLock): Promise<void>
 
 let _lastWebOrientationLock: WebOrientationLock = WebOrientationLock.UNKNOWN;
 
-export default {
-  get name(): string {
-    return 'ExpoScreenOrientation';
-  },
+class ExpoScreenOrientation extends NativeModule<ExpoOrientationEvents> {
+  orientation: ScreenOrientation | null = Platform.canUseViewport
+    ? screen.orientation || (screen as any).msOrientation || null
+    : null;
+  async emitOrientationEvent() {
+    const [orientationLock, orientation] = await Promise.all([
+      getOrientationLockAsync(),
+      getOrientationAsync(),
+    ]);
+    this.emit('expoDidUpdateDimensions', {
+      orientationLock,
+      orientationInfo: { orientation },
+    });
+  }
+  startObserving() {
+    this.listener = () => this.emitOrientationEvent();
+    if (Platform.canUseEventListeners) {
+      if (this.orientation && this.orientation.addEventListener) {
+        this.orientation.addEventListener('change', this.listener);
+      } else {
+        window.addEventListener('orientationchange', this.listener);
+      }
+    }
+  }
+  stopObserving(): void {
+    if (Platform.canUseEventListeners) {
+      if (this.orientation && this.orientation.removeEventListener) {
+        this.orientation.removeEventListener('change', this.listener);
+      } else {
+        window.removeEventListener('orientationchange', this.listener);
+      }
+    }
+  }
   async supportsOrientationLockAsync(orientationLock: OrientationLock): Promise<boolean> {
     return orientationLock in OrientationLockAPIToWeb;
-  },
+  }
   async getPlatformOrientationLockAsync(): Promise<WebOrientationLock> {
     return _lastWebOrientationLock;
-  },
+  }
   async getOrientationAsync(): Promise<Orientation> {
     const webOrientation =
       screen['msOrientation'] || (screen.orientation || screen['mozOrientation'] || {}).type;
@@ -120,18 +130,18 @@ export default {
       return Orientation.UNKNOWN;
     }
     return OrientationWebToAPI[webOrientation];
-  },
+  }
   async lockAsync(orientationLock: OrientationLock): Promise<void> {
     const webOrientationLock = OrientationLockAPIToWeb[orientationLock];
     if (!webOrientationLock) {
       throw new TypeError(`Invalid Orientation Lock: ${orientationLock}`);
     }
     await _lockAsync(webOrientationLock);
-  },
+  }
   async lockPlatformAsync(webOrientationLock: WebOrientationLock): Promise<void> {
     await _lockAsync(webOrientationLock);
     _lastWebOrientationLock = webOrientationLock;
-  },
+  }
   async unlockAsync(): Promise<void> {
     if (screen.orientation && screen.orientation.unlock) {
       screen.orientation.unlock();
@@ -154,5 +164,7 @@ export default {
         `expo-screen-orientation: The browser doesn't support unlocking screen orientation.`
       );
     }
-  },
-};
+  }
+}
+
+export default registerWebModule(ExpoScreenOrientation);

@@ -1,8 +1,8 @@
 import { AndroidConfig, withGradleProperties, withPodfileProperties } from 'expo/config-plugins';
 
+import { compileMockModWithResultsAsync } from './mockMods';
 import type { PluginConfigType } from '../pluginConfig';
 import { withBuildProperties } from '../withBuildProperties';
-import { compileMockModWithResultsAsync } from './mockMods';
 
 jest.mock('expo/config-plugins', () => {
   const plugins = jest.requireActual('expo/config-plugins');
@@ -155,5 +155,35 @@ describe(withBuildProperties, () => {
         }
       );
     }).rejects.toThrow();
+  });
+
+  it('generates the apple.ccacheEnabled property', async () => {
+    const { modResults: iosModResultsEnabled } = await compileMockModWithResultsAsync(
+      {},
+      {
+        plugin: withBuildProperties,
+        pluginProps: { ios: { ccacheEnabled: true } },
+        mod: withPodfileProperties,
+        modResults: {},
+      }
+    );
+    expect(iosModResultsEnabled).toMatchObject({
+      'apple.ccacheEnabled': 'true',
+    });
+  });
+
+  it('generates the apple.privacyManifestAggregationEnabled property', async () => {
+    const { modResults: iosModResultsEnabled } = await compileMockModWithResultsAsync(
+      {},
+      {
+        plugin: withBuildProperties,
+        pluginProps: { ios: { privacyManifestAggregationEnabled: true } },
+        mod: withPodfileProperties,
+        modResults: {},
+      }
+    );
+    expect(iosModResultsEnabled).toMatchObject({
+      'apple.privacyManifestAggregationEnabled': 'true',
+    });
   });
 });

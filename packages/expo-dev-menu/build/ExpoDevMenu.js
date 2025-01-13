@@ -1,3 +1,3 @@
-import { requireNativeModule } from 'expo-modules-core';
-export default requireNativeModule('ExpoDevMenu');
+import { requireOptionalNativeModule } from 'expo-modules-core';
+export default requireOptionalNativeModule('ExpoDevMenu');
 //# sourceMappingURL=ExpoDevMenu.js.map

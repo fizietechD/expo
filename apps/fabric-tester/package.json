@@ -9,23 +9,29 @@
     "eject": "expo eject"
   },
   "dependencies": {
-    "expo": "~49.0.0-alpha.1",
-    "expo-apple-authentication": "~6.1.0",
-    "expo-av": "~13.4.0",
-    "expo-blur": "~12.4.0",
-    "expo-camera": "~13.4.0",
-    "expo-dev-client": "~2.4.0",
-    "expo-image": "^1.0.0-alpha.4",
-    "expo-linear-gradient": "~12.3.0",
-    "expo-splash-screen": "~0.20.0",
-    "expo-status-bar": "~1.6.0",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "react-native": "0.72.1",
-    "react-native-web": "~0.19.6"
+    "expo": "~52.0.0",
+    "expo-apple-authentication": "~7.1.2",
+    "expo-blur": "~14.0.1",
+    "expo-camera": "~16.0.7",
+    "expo-dev-client": "~5.0.4",
+    "expo-image": "^2.0.2",
+    "expo-linear-gradient": "~14.0.1",
+    "expo-splash-screen": "~0.29.13",
+    "expo-status-bar": "~2.0.0",
+    "expo-updates": "~0.26.9",
+    "expo-video": "~2.0.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "react-native": "0.77.0-rc.5",
+    "react-native-web": "~0.19.13"
   },
   "devDependencies": {
-    "@babel/core": "^7.20.0"
+    "@babel/core": "^7.25.2"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "autolinking": {
+      "exclude": []
+    }
+  }
 }

@@ -2,22 +2,21 @@ import * as Application from 'expo-application';
 import { useEffect, useMemo, useState } from 'react';
 import { Platform } from 'react-native';
 
-import { useAuthRequestResult, useLoadedAuthRequest } from '../AuthRequestHooks';
-import {
-  AuthRequest,
-  AuthRequestConfig,
-  AuthRequestPromptOptions,
-  AuthSessionRedirectUriOptions,
-  AuthSessionResult,
-  DiscoveryDocument,
-  generateHexStringAsync,
-  makeRedirectUri,
-  Prompt,
-  ResponseType,
-} from '../AuthSession';
-import { AccessTokenRequest } from '../TokenRequest';
 import { ProviderAuthRequestConfig } from './Provider.types';
 import { applyRequiredScopes, invariantClientId } from './ProviderUtils';
+import { AuthRequest } from '../AuthRequest';
+import {
+  AuthRequestConfig,
+  AuthRequestPromptOptions,
+  Prompt,
+  ResponseType,
+} from '../AuthRequest.types';
+import { useAuthRequestResult, useLoadedAuthRequest } from '../AuthRequestHooks';
+import { makeRedirectUri } from '../AuthSession';
+import { AuthSessionRedirectUriOptions, AuthSessionResult } from '../AuthSession.types';
+import { DiscoveryDocument } from '../Discovery';
+import { generateHexStringAsync } from '../PKCE';
+import { AccessTokenRequest } from '../TokenRequest';
 
 const settings = {
   windowFeatures: { width: 515, height: 680 },
@@ -39,7 +38,7 @@ export const discovery: DiscoveryDocument = {
 /**
  * @deprecated See [Google authentication](/guides/google-authentication/).
  */
-export interface GoogleAuthRequestConfig extends ProviderAuthRequestConfig {
+export type GoogleAuthRequestConfig = ProviderAuthRequestConfig & {
   /**
    * If the user's email address is known ahead of time, it can be supplied to be the default option.
    * If the user has approved access for this app in the past then auth may return without any further interaction.
@@ -50,10 +49,6 @@ export interface GoogleAuthRequestConfig extends ProviderAuthRequestConfig {
    * @default false.
    */
   selectAccount?: boolean;
-  /**
-   * Proxy client ID for use in the Expo client on Android and iOS.
-   */
-  expoClientId?: string;
   /**
    * Expo web client ID for use in the browser.
    */
@@ -76,7 +71,7 @@ export interface GoogleAuthRequestConfig extends ProviderAuthRequestConfig {
    * Language code ISO 3166-1 alpha-2 region code, such as 'it' or 'pt-PT'.
    */
   language?: string;
-}
+};
 
 // @needsAudit
 /**
@@ -159,7 +154,7 @@ export function useIdTokenAuthRequest(
 ): [
   GoogleAuthRequest | null,
   AuthSessionResult | null,
-  (options?: AuthRequestPromptOptions) => Promise<AuthSessionResult>
+  (options?: AuthRequestPromptOptions) => Promise<AuthSessionResult>,
 ] {
   const isWebAuth = Platform.OS === 'web';
 
@@ -194,7 +189,7 @@ export function useAuthRequest(
 ): [
   GoogleAuthRequest | null,
   AuthSessionResult | null,
-  (options?: AuthRequestPromptOptions) => Promise<AuthSessionResult>
+  (options?: AuthRequestPromptOptions) => Promise<AuthSessionResult>,
 ] {
   const clientId = useMemo((): string => {
     const propertyName = Platform.select({
@@ -206,13 +201,7 @@ export function useAuthRequest(
     const clientId = config[propertyName as any] ?? config.clientId;
     invariantClientId(propertyName, clientId, 'Google');
     return clientId;
-  }, [
-    config.expoClientId,
-    config.iosClientId,
-    config.androidClientId,
-    config.webClientId,
-    config.clientId,
-  ]);
+  }, [config.iosClientId, config.androidClientId, config.webClientId, config.clientId]);
 
   const responseType = useMemo(() => {
     // Allow overrides.

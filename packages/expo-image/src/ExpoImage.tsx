@@ -1,4 +1,4 @@
-import { requireNativeViewManager, requireNativeModule } from 'expo-modules-core';
+import { requireNativeViewManager } from 'expo-modules-core';
 import React from 'react';
 import { NativeSyntheticEvent, StyleSheet, Platform, processColor } from 'react-native';
 
@@ -10,8 +10,6 @@ import {
 } from './Image.types';
 
 const NativeExpoImage = requireNativeViewManager('ExpoImage');
-
-const ExpoImageModule = requireNativeModule('ExpoImage');
 
 function withDeprecatedNativeEvent<NativeEvent>(
   event: NativeSyntheticEvent<NativeEvent>
@@ -110,10 +108,10 @@ class ExpoImage extends React.PureComponent<ImageNativeProps> {
         borderStartColor={borderStartColor}
         borderEndColor={borderEndColor}
         backgroundColor={backgroundColor}
+        ref={props.nativeViewRef}
       />
     );
   }
 }
 
-export { ExpoImageModule };
 export default ExpoImage;

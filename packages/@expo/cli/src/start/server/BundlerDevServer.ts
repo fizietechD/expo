@@ -1,7 +1,11 @@
-import { MessageSocket } from '@expo/dev-server';
 import assert from 'assert';
 import resolveFrom from 'resolve-from';
 
+import { AsyncNgrok } from './AsyncNgrok';
+import DevToolsPluginManager from './DevToolsPluginManager';
+import { DevelopmentSession } from './DevelopmentSession';
+import { CreateURLOptions, UrlCreator } from './UrlCreator';
+import { PlatformBundlers } from './platformBundlers';
 import * as Log from '../../log';
 import { FileNotifier } from '../../utils/FileNotifier';
 import { resolveWithTimeout } from '../../utils/delay';
@@ -13,12 +17,12 @@ import {
   BaseResolveDeviceProps,
   PlatformManager,
 } from '../platforms/PlatformManager';
-import { AsyncNgrok } from './AsyncNgrok';
-import { DevelopmentSession } from './DevelopmentSession';
-import { CreateURLOptions, UrlCreator } from './UrlCreator';
-import { PlatformBundlers } from './platformBundlers';
 
 const debug = require('debug')('expo:start:server:devServer') as typeof console.log;
+
+export type MessageSocket = {
+  broadcast: (method: string, params?: Record<string, any> | undefined) => void;
+};
 
 export type ServerLike = {
   close(callback?: (err?: Error) => void): void;
@@ -50,8 +54,6 @@ export interface BundlerStartOptions {
   devClient?: boolean;
   /** Should run dev servers with clean caches. */
   resetDevServer?: boolean;
-  /** Which manifest type to serve. */
-  forceManifestType?: 'expo-updates' | 'classic';
   /** Code signing private key path (defaults to same directory as certificate) */
   privateKeyPath?: string;
 
@@ -64,6 +66,9 @@ export interface BundlerStartOptions {
   headless?: boolean;
   /** Should instruct the bundler to create minified bundles. */
   minify?: boolean;
+
+  /** Will the bundler be used for exporting. NOTE: This is an odd option to pass to the dev server. */
+  isExporting?: boolean;
 
   // Webpack options
   /** Should modify and create PWA icons. */
@@ -79,15 +84,6 @@ const PLATFORM_MANAGERS = {
   emulator: () =>
     require('../platforms/android/AndroidPlatformManager')
       .AndroidPlatformManager as typeof import('../platforms/android/AndroidPlatformManager').AndroidPlatformManager,
-};
-
-const MIDDLEWARES = {
-  classic: () =>
-    require('./middleware/ClassicManifestMiddleware')
-      .ClassicManifestMiddleware as typeof import('./middleware/ClassicManifestMiddleware').ClassicManifestMiddleware,
-  'expo-updates': () =>
-    require('./middleware/ExpoGoManifestHandlerMiddleware')
-      .ExpoGoManifestHandlerMiddleware as typeof import('./middleware/ExpoGoManifestHandlerMiddleware').ExpoGoManifestHandlerMiddleware,
 };
 
 export abstract class BundlerDevServer {
@@ -106,15 +102,29 @@ export abstract class BundlerDevServer {
   protected urlCreator?: UrlCreator | null = null;
 
   private notifier: FileNotifier | null = null;
+  protected readonly devToolsPluginManager: DevToolsPluginManager;
+  public isDevClient: boolean;
 
   constructor(
     /** Project root folder. */
     public projectRoot: string,
     /** A mapping of bundlers to platforms. */
     public platformBundlers: PlatformBundlers,
-    // TODO: Replace with custom scheme maybe...
-    public isDevClient?: boolean
-  ) {}
+    /** Advanced options */
+    options?: {
+      /**
+       * The instance of DevToolsPluginManager
+       * @default new DevToolsPluginManager(projectRoot)
+       */
+      devToolsPluginManager?: DevToolsPluginManager;
+      // TODO: Replace with custom scheme maybe...
+      isDevClient?: boolean;
+    }
+  ) {
+    this.devToolsPluginManager =
+      options?.devToolsPluginManager ?? new DevToolsPluginManager(projectRoot);
+    this.isDevClient = options?.isDevClient ?? false;
+  }
 
   protected setInstance(instance: DevServerInstance) {
     this.instance = instance;
@@ -122,14 +132,10 @@ export abstract class BundlerDevServer {
 
   /** Get the manifest middleware function. */
   protected async getManifestMiddlewareAsync(
-    options: Pick<
-      BundlerStartOptions,
-      'minify' | 'mode' | 'forceManifestType' | 'privateKeyPath'
-    > = {}
+    options: Pick<BundlerStartOptions, 'minify' | 'mode' | 'privateKeyPath'> = {}
   ) {
-    const manifestType = options.forceManifestType || 'classic';
-    assert(manifestType in MIDDLEWARES, `Manifest middleware for type '${manifestType}' not found`);
-    const Middleware = MIDDLEWARES[manifestType]();
+    const Middleware = require('./middleware/ExpoGoManifestHandlerMiddleware')
+      .ExpoGoManifestHandlerMiddleware as typeof import('./middleware/ExpoGoManifestHandlerMiddleware').ExpoGoManifestHandlerMiddleware;
 
     const urlCreator = this.getUrlCreator();
     const middleware = new Middleware(this.projectRoot, {
@@ -184,8 +190,9 @@ export abstract class BundlerDevServer {
     return {
       // Create a mock server
       server: {
-        close: () => {
+        close: (callback: () => void) => {
           this.instance = null;
+          callback?.();
         },
         addListener() {},
       },
@@ -220,9 +227,11 @@ export abstract class BundlerDevServer {
     ) {
       await this._startTunnelAsync();
     }
-    await this.startDevSessionAsync();
 
-    this.watchConfig();
+    if (!options.isExporting) {
+      await this.startDevSessionAsync();
+      this.watchConfig();
+    }
   }
 
   protected abstract getConfigModuleIds(): string[];
@@ -246,26 +255,12 @@ export abstract class BundlerDevServer {
   protected async startDevSessionAsync() {
     // This is used to make Expo Go open the project in either Expo Go, or the web browser.
     // Must come after ngrok (`startTunnelAsync`) setup.
-    this.devSession?.stopNotifying?.();
     this.devSession = new DevelopmentSession(
       this.projectRoot,
       // This URL will be used on external devices so the computer IP won't be relevant.
       this.isTargetingNative()
         ? this.getNativeRuntimeUrl()
-        : this.getDevServerUrl({ hostType: 'localhost' }),
-      () => {
-        // TODO: This appears to be happening consistently after an hour.
-        // We should investigate why this is happening and fix it on our servers.
-        // Log.error(
-        //   chalk.red(
-        //     '\nAn unexpected error occurred while updating the Dev Session API. This project will not appear in the "Development servers" section of the Expo Go app until this process has been restarted.'
-        //   )
-        // );
-        // Log.exception(error);
-        this.devSession?.closeAsync().catch((error) => {
-          debug('[dev-session] error closing: ' + error.message);
-        });
-      }
+        : this.getDevServerUrl({ hostType: 'localhost' })
     );
 
     await this.devSession.startAsync({
@@ -322,11 +317,16 @@ export abstract class BundlerDevServer {
           debug(`Stopping dev server (bundler: ${this.name})`);
 
           if (this.instance?.server) {
+            // Check if server is even running.
             this.instance.server.close((error) => {
               debug(`Stopped dev server (bundler: ${this.name})`);
               this.instance = null;
               if (error) {
-                reject(error);
+                if ('code' in error && error.code === 'ERR_SERVER_NOT_RUNNING') {
+                  resolve();
+                } else {
+                  reject(error);
+                }
               } else {
                 resolve();
               }
@@ -358,7 +358,7 @@ export abstract class BundlerDevServer {
 
   public getNativeRuntimeUrl(opts: Partial<CreateURLOptions> = {}) {
     return this.isDevClient
-      ? this.getUrlCreator().constructDevClientUrl(opts) ?? this.getDevServerUrl()
+      ? (this.getUrlCreator().constructDevClientUrl(opts) ?? this.getDevServerUrl())
       : this.getUrlCreator().constructUrl({ ...opts, scheme: 'exp' });
   }
 
@@ -373,6 +373,18 @@ export abstract class BundlerDevServer {
       return `${location.protocol}://localhost:${location.port}`;
     }
     return location.url ?? null;
+  }
+
+  public getDevServerUrlOrAssert(options: { hostType?: 'localhost' } = {}): string {
+    const instance = this.getDevServerUrl(options);
+    if (!instance) {
+      throw new CommandError(
+        'DEV_SERVER',
+        `Cannot get the dev server URL before the server has started - bundler[${this.name}]`
+      );
+    }
+
+    return instance;
   }
 
   /** Get the base URL for JS inspector */
@@ -399,7 +411,7 @@ export abstract class BundlerDevServer {
     if (launchTarget === 'desktop') {
       const serverUrl = this.getDevServerUrl({ hostType: 'localhost' });
       // Allow opening the tunnel URL when using Metro web.
-      const url = this.name === 'metro' ? this.getTunnelUrl() ?? serverUrl : serverUrl;
+      const url = this.name === 'metro' ? (this.getTunnelUrl() ?? serverUrl) : serverUrl;
       await openBrowserAsync(url!);
       return { url };
     }
@@ -410,9 +422,9 @@ export abstract class BundlerDevServer {
   }
 
   /** Open the dev server in a runtime. */
-  public async openCustomRuntimeAsync(
+  public async openCustomRuntimeAsync<T extends BaseOpenInCustomProps = BaseOpenInCustomProps>(
     launchTarget: keyof typeof PLATFORM_MANAGERS,
-    launchProps: Partial<BaseOpenInCustomProps> = {},
+    launchProps: Partial<T> = {},
     resolver: BaseResolveDeviceProps<any> = {}
   ) {
     const runtime = this.isTargetingNative() ? (this.isDevClient ? 'custom' : 'expo') : 'web';

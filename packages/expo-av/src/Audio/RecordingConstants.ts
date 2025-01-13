@@ -1,26 +1,70 @@
 import type { RecordingOptions } from './Recording.types';
 
-// @docsMissing
+/**
+ * Defines the output format.
+ * @platform android
+ */
 export enum AndroidOutputFormat {
   DEFAULT = 0,
+  /**
+   * 3GPP media file format.
+   */
   THREE_GPP = 1,
+  /**
+   * MPEG4 media file format.
+   */
   MPEG_4 = 2,
+  /**
+   * AMR NB file format.
+   */
   AMR_NB = 3,
+  /**
+   * AMR WB file format.
+   */
   AMR_WB = 4,
+  // @docsMissing
   AAC_ADIF = 5,
+  /**
+   * AAC ADTS file format.
+   */
   AAC_ADTS = 6,
+  // @docsMissing
   RTP_AVP = 7,
+  /**
+   * H.264/AAC data encapsulated in MPEG2/TS.
+   */
   MPEG2TS = 8,
+  /**
+   * VP8/VORBIS data in a WEBM container.
+   */
   WEBM = 9,
 }
 
-// @docsMissing
+/**
+ * Defines the audio encoding.
+ * @platform android
+ */
 export enum AndroidAudioEncoder {
   DEFAULT = 0,
+  /**
+   * AMR (Narrowband) audio codec.
+   */
   AMR_NB = 1,
+  /**
+   * AMR (Wideband) audio codec.
+   */
   AMR_WB = 2,
+  /**
+   * AAC Low Complexity (AAC-LC) audio codec.
+   */
   AAC = 3,
+  /**
+   * High Efficiency AAC (HE-AAC) audio codec.
+   */
   HE_AAC = 4,
+  /**
+   * Enhanced Low Delay AAC (AAC-ELD) audio codec.
+   */
   AAC_ELD = 5,
 }
 
@@ -125,11 +169,12 @@ const LOW_QUALITY: RecordingOptions = {
     bitRate: 128000,
   },
   ios: {
-    extension: '.caf',
+    extension: '.m4a',
     audioQuality: IOSAudioQuality.MIN,
+    outputFormat: IOSOutputFormat.MPEG4AAC,
     sampleRate: 44100,
     numberOfChannels: 2,
-    bitRate: 128000,
+    bitRate: 64000,
     linearPCMBitDepth: 16,
     linearPCMIsBigEndian: false,
     linearPCMIsFloat: false,

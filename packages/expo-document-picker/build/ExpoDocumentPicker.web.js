@@ -1,8 +1,5 @@
 import { Platform } from 'expo-modules-core';
 export default {
-    get name() {
-        return 'ExpoDocumentPicker';
-    },
     async getDocumentAsync({ type = '*/*', multiple = false, }) {
         // SSR guard
         if (!Platform.isDOMAvailable) {
@@ -36,6 +33,9 @@ export default {
                     resolve({ canceled: true, assets: null });
                 }
                 document.body.removeChild(input);
+            });
+            input.addEventListener('cancel', () => {
+                resolve({ canceled: true, assets: null });
             });
             const event = new MouseEvent('click');
             input.dispatchEvent(event);

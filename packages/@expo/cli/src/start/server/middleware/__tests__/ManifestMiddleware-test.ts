@@ -1,6 +1,6 @@
 import { getConfig } from '@expo/config';
+import { vol } from 'memfs';
 
-import { asMock } from '../../../../__tests__/asMock';
 import * as Log from '../../../../log';
 import * as ProjectDevices from '../../../project/devices';
 import { getPlatformBundlers } from '../../platformBundlers';
@@ -20,9 +20,9 @@ jest.mock('../resolveAssets', () => ({
   resolveManifestAssets: jest.fn(),
   resolveGoogleServicesFile: jest.fn(),
 }));
-jest.mock('../resolveEntryPoint', () => ({
-  resolveEntryPoint: jest.fn(() => './index.js'),
-  resolveAbsoluteEntryPoint: jest.fn((projectRoot: string) =>
+jest.mock('@expo/config/paths', () => ({
+  ...jest.requireActual('@expo/config/paths'),
+  resolveEntryPoint: jest.fn((projectRoot: string) =>
     require('path').join(projectRoot, './index.js')
   ),
 }));
@@ -51,9 +51,6 @@ class MockManifestMiddleware extends ManifestMiddleware<any> {
   public getParsedHeaders(req: ServerRequest): ManifestRequestInfo {
     throw new Error('Method not implemented.');
   }
-  protected trackManifest(version?: string): void {
-    throw new Error('Method not implemented.');
-  }
 }
 
 const asReq = (req: Partial<ServerRequest>) => req as ServerRequest;
@@ -64,11 +61,24 @@ describe('checkBrowserRequestAsync', () => {
     jest.fn(({ scheme, hostname }) => `${scheme}://${hostname ?? 'localhost'}:8080`);
 
   it('handles browser requests when the web bundler is "metro" and no platform is specified', async () => {
-    asMock(getPlatformBundlers).mockReturnValueOnce({
+    jest.mocked(getPlatformBundlers).mockReturnValueOnce({
       web: 'metro',
       ios: 'metro',
       android: 'metro',
     });
+
+    jest.mocked(getConfig).mockReturnValueOnce(
+      // @ts-expect-error
+      {
+        pkg: {},
+        exp: {
+          sdkVersion: '45.0.0',
+          name: 'my-app',
+          slug: 'my-app',
+          platforms: ['ios', 'android', 'web'],
+        },
+      }
+    );
 
     const middleware = new MockManifestMiddleware('/', {
       constructUrl: createConstructUrl(),
@@ -88,12 +98,17 @@ describe('checkBrowserRequestAsync', () => {
     ).toBe(true);
 
     expect(createTemplateHtmlFromExpoConfigAsync).toHaveBeenCalledWith('/', {
-      exp: { name: 'my-app', sdkVersion: '45.0.0', slug: 'my-app' },
+      exp: {
+        name: 'my-app',
+        sdkVersion: '45.0.0',
+        slug: 'my-app',
+        platforms: ['ios', 'android', 'web'],
+      },
       scripts: [
         // NOTE(EvanBacon): Browsers won't pass the `expo-platform` header so we need to
         // provide the `platform=web` query parameter in order for the multi-platform dev server
         // to return the correct bundle.
-        '/index.bundle?platform=web&dev=true&hot=false&lazy=true',
+        '/index.bundle?platform=web&dev=true&hot=false&transform.engine=hermes&transform.routerRoot=app&unstable_transformProfile=hermes-stable',
       ],
     });
     expect(res.setHeader).toBeCalledWith('Content-Type', 'text/html');
@@ -101,7 +116,7 @@ describe('checkBrowserRequestAsync', () => {
   });
 
   it('skips handling browser requests when the web bundler is "webpack"', async () => {
-    asMock(getPlatformBundlers).mockReturnValueOnce({
+    jest.mocked(getPlatformBundlers).mockReturnValueOnce({
       web: 'webpack',
       ios: 'metro',
       android: 'metro',
@@ -127,6 +142,14 @@ describe('checkBrowserRequestAsync', () => {
 });
 
 describe('_getBundleUrl', () => {
+  beforeEach(() => {
+    vol.reset();
+  });
+
+  afterAll(() => {
+    vol.reset();
+  });
+
   const createConstructUrl = () =>
     jest.fn(({ scheme, hostname }) => `${scheme}://${hostname ?? 'localhost'}:8080`);
   it('returns the bundle url with the hostname', () => {
@@ -138,13 +161,36 @@ describe('_getBundleUrl', () => {
         mainModuleName: 'index',
         platform: 'android',
       })
-    ).toEqual(
-      'http://evanbacon.dev:8080/index.bundle?platform=android&dev=true&hot=false&lazy=true'
-    );
+    ).toEqual('http://evanbacon.dev:8080/index.bundle?platform=android&dev=true&hot=false');
 
     expect(constructUrl).toHaveBeenCalledWith({ hostname: 'evanbacon.dev', scheme: 'http' });
   });
   it('returns the bundle url in production', () => {
+    const constructUrl = createConstructUrl();
+    const middleware = new MockManifestMiddleware('/', {
+      constructUrl,
+      mode: 'production',
+      minify: true,
+    });
+    expect(
+      middleware._getBundleUrl({
+        mainModuleName: 'node_modules/expo/AppEntry',
+        platform: 'ios',
+      })
+    ).toEqual(
+      'http://localhost:8080/node_modules/expo/AppEntry.bundle?platform=ios&dev=false&hot=false&minify=true'
+    );
+
+    expect(constructUrl).toHaveBeenCalledWith({ hostname: undefined, scheme: 'http' });
+  });
+
+  it('returns the bundle url in production with lazy enabled', () => {
+    vol.fromJSON(
+      {
+        'node_modules/@expo/metro-runtime/package.json': '',
+      },
+      '/'
+    );
     const constructUrl = createConstructUrl();
     const middleware = new MockManifestMiddleware('/', {
       constructUrl,
@@ -171,7 +217,7 @@ describe('_resolveProjectSettingsAsync', () => {
       mode: 'development',
     });
 
-    asMock(getConfig).mockClear();
+    jest.mocked(getConfig).mockClear();
 
     middleware._getBundleUrl = jest.fn(() => 'http://fake.mock/index.bundle');
 
@@ -186,7 +232,6 @@ describe('_resolveProjectSettingsAsync', () => {
         __flipperHack: 'React Native packager is running',
         debuggerHost: 'http://fake.mock',
         developer: { projectRoot: '/', tool: 'expo-cli' },
-        logUrl: 'http://fake.mock/logs',
         mainModuleName: 'index',
         packagerOpts: { dev: true },
       },
@@ -203,7 +248,7 @@ describe('_resolveProjectSettingsAsync', () => {
       mode: 'production',
     });
 
-    asMock(getConfig).mockClear();
+    jest.mocked(getConfig).mockClear();
 
     middleware._getBundleUrl = jest.fn(() => 'http://fake.mock/index.bundle');
 
@@ -218,7 +263,6 @@ describe('_resolveProjectSettingsAsync', () => {
         __flipperHack: 'React Native packager is running',
         debuggerHost: 'http://fake.mock',
         developer: { projectRoot: '/', tool: 'expo-cli' },
-        logUrl: 'http://fake.mock/logs',
         mainModuleName: 'index',
         packagerOpts: { dev: false },
       },
@@ -235,7 +279,6 @@ describe('getHandler', () => {
     const middleware = new MockManifestMiddleware('/', {
       constructUrl: jest.fn(() => 'http://fake.mock'),
     });
-    middleware['trackManifest'] = jest.fn();
     // @ts-expect-error
     middleware.getParsedHeaders = jest.fn(() => ({}));
     // @ts-expect-error
@@ -272,7 +315,6 @@ describe('getHandler', () => {
 
     // Internals are invoked.
     expect(middleware._getManifestResponseAsync).toBeCalled();
-    expect(middleware['trackManifest']).toBeCalled();
 
     // Generally tests that the server I/O works as expected so we don't need to test this in subclasses.
     expect(res.statusCode).toEqual(200);
@@ -285,7 +327,6 @@ describe('getHandler', () => {
     const middleware = new MockManifestMiddleware('/', {
       constructUrl: jest.fn(() => 'http://fake.mock'),
     });
-    middleware['trackManifest'] = jest.fn();
     // @ts-expect-error
     middleware.getParsedHeaders = jest.fn(() => ({}));
     middleware._getManifestResponseAsync = jest.fn(async () => {
@@ -319,9 +360,6 @@ describe('getHandler', () => {
 
     // Internals are invoked.
     expect(middleware._getManifestResponseAsync).toBeCalled();
-
-    // Don't track failures.
-    expect(middleware['trackManifest']).not.toBeCalled();
 
     // Generally tests that the server I/O works as expected so we don't need to test this in subclasses.
     expect(res.statusCode).toEqual(500);

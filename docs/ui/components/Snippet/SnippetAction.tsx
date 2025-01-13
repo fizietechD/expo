@@ -6,9 +6,14 @@ export type SnippetActionProps = ButtonProps & {
   alwaysDark?: boolean;
 };
 
-export const SnippetAction = (props: SnippetActionProps) => {
-  const { children, leftSlot, rightSlot, alwaysDark = false, ...rest } = props;
-
+export const SnippetAction = ({
+  children,
+  leftSlot,
+  rightSlot,
+  className,
+  alwaysDark = false,
+  ...rest
+}: SnippetActionProps) => {
   return (
     <Button
       size="xs"
@@ -16,14 +21,19 @@ export const SnippetAction = (props: SnippetActionProps) => {
       leftSlot={leftSlot}
       rightSlot={rightSlot}
       className={mergeClasses(
-        'focus-visible:-outline-offset-2',
+        'gap-1.5 focus-visible:-outline-offset-2',
         alwaysDark &&
-          'dark-theme border-transparent bg-[transparent] hocus:shadow-xs hocus:border-palette-gray9 hocus:bg-palette-gray5',
+          'dark-theme border-transparent bg-transparent hocus:border-palette-gray9 hocus:bg-palette-gray5 hocus:shadow-xs',
         !alwaysDark &&
-          'border-0 rounded-none border-l border-l-default h-10 leading-10 px-4 hocus:bg-subtle hocus:shadow-none'
+          'h-10 rounded-none border-0 border-l border-l-default px-4 leading-10 hocus:bg-subtle hocus:shadow-none',
+        className
       )}
       {...rest}>
-      <FOOTNOTE className={mergeClasses(alwaysDark && '!text-palette-white')}>{children}</FOOTNOTE>
+      {children && (
+        <FOOTNOTE className={mergeClasses(alwaysDark && '!text-palette-white')}>
+          {children}
+        </FOOTNOTE>
+      )}
     </Button>
   );
 };

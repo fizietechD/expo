@@ -18,7 +18,7 @@ const EXPO_SDK_MINIMAL_SUPPORTED_VERSIONS = {
         kotlinVersion: '1.6.10',
     },
     ios: {
-        deploymentTarget: '13.0',
+        deploymentTarget: '15.1',
     },
 };
 const schema = {
@@ -35,11 +35,8 @@ const schema = {
                 kotlinVersion: { type: 'string', nullable: true },
                 enableProguardInReleaseBuilds: { type: 'boolean', nullable: true },
                 enableShrinkResourcesInReleaseBuilds: { type: 'boolean', nullable: true },
+                enablePngCrunchInReleaseBuilds: { type: 'boolean', nullable: true },
                 extraProguardRules: { type: 'string', nullable: true },
-                flipper: {
-                    type: 'string',
-                    nullable: true,
-                },
                 packagingOptions: {
                     type: 'object',
                     properties: {
@@ -51,8 +48,94 @@ const schema = {
                     nullable: true,
                 },
                 networkInspector: { type: 'boolean', nullable: true },
-                extraMavenRepos: { type: 'array', items: { type: 'string' }, nullable: true },
+                extraMavenRepos: {
+                    type: 'array',
+                    items: {
+                        type: ['string', 'object'],
+                        anyOf: [
+                            { type: 'string', nullable: false },
+                            {
+                                type: 'object',
+                                required: ['url'],
+                                properties: {
+                                    url: { type: 'string', nullable: false },
+                                    credentials: {
+                                        type: 'object',
+                                        oneOf: [
+                                            {
+                                                type: 'object',
+                                                properties: {
+                                                    username: { type: 'string' },
+                                                    password: { type: 'string' },
+                                                },
+                                                required: ['username', 'password'],
+                                                additionalProperties: false,
+                                            },
+                                            {
+                                                type: 'object',
+                                                properties: {
+                                                    name: { type: 'string' },
+                                                    value: { type: 'string' },
+                                                },
+                                                required: ['name', 'value'],
+                                                additionalProperties: false,
+                                            },
+                                            {
+                                                type: 'object',
+                                                properties: {
+                                                    accessKey: { type: 'string' },
+                                                    secretKey: { type: 'string' },
+                                                    sessionToken: { type: 'string', nullable: true },
+                                                },
+                                                required: ['accessKey', 'secretKey'],
+                                                additionalProperties: false,
+                                            },
+                                        ],
+                                        nullable: true,
+                                    },
+                                    authentication: {
+                                        type: 'string',
+                                        enum: ['basic', 'digest', 'header'],
+                                        nullable: true,
+                                    },
+                                },
+                                additionalProperties: false,
+                            },
+                        ],
+                    },
+                    nullable: true,
+                },
                 usesCleartextTraffic: { type: 'boolean', nullable: true },
+                useLegacyPackaging: { type: 'boolean', nullable: true },
+                useDayNightTheme: { type: 'boolean', nullable: true },
+                manifestQueries: {
+                    type: 'object',
+                    properties: {
+                        package: { type: 'array', items: { type: 'string' }, minItems: 1, nullable: true },
+                        intent: {
+                            type: 'array',
+                            items: {
+                                type: 'object',
+                                properties: {
+                                    action: { type: 'string', nullable: true },
+                                    data: {
+                                        type: 'object',
+                                        properties: {
+                                            scheme: { type: 'string', nullable: true },
+                                            host: { type: 'string', nullable: true },
+                                            mimeType: { type: 'string', nullable: true },
+                                        },
+                                        nullable: true,
+                                    },
+                                    category: { type: 'array', items: { type: 'string' }, nullable: true },
+                                },
+                            },
+                            nullable: true,
+                        },
+                        provider: { type: 'array', items: { type: 'string' }, minItems: 1, nullable: true },
+                    },
+                    nullable: true,
+                },
             },
             nullable: true,
         },
@@ -62,11 +145,9 @@ const schema = {
                 newArchEnabled: { type: 'boolean', nullable: true },
                 deploymentTarget: { type: 'string', pattern: '\\d+\\.\\d+', nullable: true },
                 useFrameworks: { type: 'string', enum: ['static', 'dynamic'], nullable: true },
-                flipper: {
-                    type: ['boolean', 'string'],
-                    nullable: true,
-                },
                 networkInspector: { type: 'boolean', nullable: true },
+                ccacheEnabled: { type: 'boolean', nullable: true },
+                privacyManifestAggregationEnabled: { type: 'boolean', nullable: true },
                 extraPods: {
                     type: 'array',
                     items: {
@@ -152,11 +233,6 @@ function validateConfig(config) {
         throw new Error('Invalid expo-build-properties config: ' + JSON.stringify(validate.errors));
     }
     maybeThrowInvalidVersions(config);
-    // explicitly block using use_frameworks and Flipper in iOS
-    // https://github.com/facebook/flipper/issues/2414
-    if (Boolean(config.ios?.flipper) && config.ios?.useFrameworks !== undefined) {
-        throw new Error('`ios.flipper` cannot be enabled when `ios.useFrameworks` is set.');
-    }
     if (config.android?.enableShrinkResourcesInReleaseBuilds === true &&
         config.android?.enableProguardInReleaseBuilds !== true) {
         throw new Error('`android.enableShrinkResourcesInReleaseBuilds` requires `android.enableProguardInReleaseBuilds` to be enabled.');

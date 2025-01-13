@@ -1,6 +1,3 @@
-import { Platform } from 'expo-modules-core';
-import qs from 'qs';
-
 export type Headers = Record<string, string> & {
   'Content-Type': string;
   Authorization?: string;
@@ -14,18 +11,7 @@ export type FetchRequest = {
   method?: string;
 };
 
-// TODO(Bacon): pending react-native-adapter publish after sdk 38
-const isDOMAvailable =
-  Platform.OS === 'web' &&
-  typeof window !== 'undefined' &&
-  !!window.document?.createElement &&
-  typeof URL !== 'undefined';
-
 export async function requestAsync<T>(requestUrl: string, fetchRequest: FetchRequest): Promise<T> {
-  if (Platform.OS === 'web' && !isDOMAvailable) {
-    // @ts-ignore
-    return;
-  }
   const url = new URL(requestUrl);
 
   const request: Omit<RequestInit, 'headers'> & { headers: HeadersInit } = {
@@ -46,7 +32,7 @@ export async function requestAsync<T>(requestUrl: string, fetchRequest: FetchReq
 
   if (fetchRequest.body) {
     if (fetchRequest.method?.toUpperCase() === 'POST') {
-      request.body = qs.stringify(fetchRequest.body);
+      request.body = new URLSearchParams(fetchRequest.body).toString();
     } else {
       for (const key of Object.keys(fetchRequest.body)) {
         url.searchParams.append(key, fetchRequest.body[key]);

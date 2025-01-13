@@ -1,8 +1,5 @@
 // Copyright 2019 650 Industries. All rights reserved.
 
-// swiftlint:disable closure_body_length
-// swiftlint:disable superfluous_else
-
 import ExpoModulesCore
 
 /**
@@ -14,147 +11,83 @@ import ExpoModulesCore
  * Expo Go and legacy standalone apps) via EXUpdatesService, an internal module which is overridden
  * by EXUpdatesBinding, a scoped module, in Expo Go.
  */
-public final class UpdatesModule: Module {
-  private let updatesService: EXUpdatesModuleInterface?
-  private let methodQueue = UpdatesUtils.methodQueue
-
-  public required init(appContext: AppContext) {
-    updatesService = appContext.legacyModule(implementing: EXUpdatesModuleInterface.self)
-    super.init(appContext: appContext)
-  }
-
-  // swiftlint:disable cyclomatic_complexity
+public final class UpdatesModule: Module, UpdatesEventManagerObserver {
   public func definition() -> ModuleDefinition {
     Name("ExpoUpdates")
 
+    Events(
+      EXUpdatesStateChangeEventName
+    )
+
     Constants {
-      let releaseChannel = updatesService?.config?.releaseChannel
-      let channel = updatesService?.config?.requestHeaders["expo-channel-name"] ?? ""
-      let runtimeVersion = updatesService?.config?.runtimeVersion ?? ""
-      let checkAutomatically = updatesService?.config?.checkOnLaunch.asString ?? CheckAutomaticallyConfig.Always.asString
-      let isMissingRuntimeVersion = updatesService?.config?.isMissingRuntimeVersion()
+      AppController.sharedInstance.getConstantsForModule().toModuleConstantsMap()
+    }
 
-      guard let updatesService = updatesService,
-        updatesService.isStarted,
-        let launchedUpdate = updatesService.launchedUpdate else {
-        return [
-          "isEnabled": false,
-          "isEmbeddedLaunch": false,
-          "isMissingRuntimeVersion": isMissingRuntimeVersion,
-          "releaseChannel": releaseChannel,
-          "runtimeVersion": runtimeVersion,
-          "checkAutomatically": checkAutomatically,
-          "channel": channel
-        ]
-      }
+    OnStartObserving(EXUpdatesStateChangeEventName) {
+      AppController.setUpdatesEventManagerObserver(self)
+    }
 
-      let commitTime = UInt64(floor(launchedUpdate.commitTime.timeIntervalSince1970 * 1000))
-      return [
-        "isEnabled": true,
-        "isEmbeddedLaunch": updatesService.isEmbeddedLaunch,
-        "isUsingEmbeddedAssets": updatesService.isUsingEmbeddedAssets,
-        "updateId": launchedUpdate.updateId.uuidString,
-        "manifest": launchedUpdate.manifest.rawManifestJSON(),
-        "localAssets": updatesService.assetFilesMap ?? [:],
-        "isEmergencyLaunch": updatesService.isEmergencyLaunch,
-        "isMissingRuntimeVersion": isMissingRuntimeVersion,
-        "releaseChannel": releaseChannel,
-        "runtimeVersion": runtimeVersion,
-        "checkAutomatically": checkAutomatically,
-        "channel": channel,
-        "commitTime": commitTime,
-        "nativeDebug": UpdatesUtils.isNativeDebuggingEnabled()
-      ]
+    OnStopObserving(EXUpdatesStateChangeEventName) {
+      AppController.removeUpdatesEventManagerObserver()
+    }
+
+    OnDestroy {
+      AppController.removeUpdatesEventManagerObserver()
     }
 
     AsyncFunction("reload") { (promise: Promise) in
-      guard let updatesService = updatesService, let config = updatesService.config, config.isEnabled else {
-        throw UpdatesDisabledException()
-      }
-      guard updatesService.canRelaunch else {
-        throw UpdatesNotInitializedException()
-      }
-      updatesService.requestRelaunch { success in
-        if success {
-          promise.resolve(nil)
-        } else {
-          promise.reject(UpdatesReloadException())
-        }
+      AppController.sharedInstance.requestRelaunch {
+        promise.resolve(nil)
+      } error: { error in
+        promise.reject(error)
       }
     }
 
     AsyncFunction("checkForUpdateAsync") { (promise: Promise) in
-      let maybeIsCheckForUpdateEnabled: Bool? = updatesService?.canCheckForUpdateAndFetchUpdate ?? true
-      guard maybeIsCheckForUpdateEnabled ?? false else {
-        promise.reject("ERR_UPDATES_CHECK", "checkForUpdateAsync() is not enabled")
-        return
-      }
-      UpdatesUtils.checkForUpdate { result in
-        if result["message"] != nil {
-          guard let message = result["message"] as? String else {
-            promise.reject("ERR_UPDATES_CHECK", "")
-            return
-          }
-          promise.reject("ERR_UPDATES_CHECK", message)
+      AppController.sharedInstance.checkForUpdate { checkForUpdateResult in
+        switch checkForUpdateResult {
+        case .noUpdateAvailable(let reason):
+          promise.resolve([
+            "isAvailable": false,
+            "isRollBackToEmbedded": false,
+            "reason": reason
+          ])
           return
-        }
-        if result["manifest"] != nil {
+        case .updateAvailable(let manifest):
           promise.resolve([
             "isAvailable": true,
-            "manifest": result["manifest"],
+            "manifest": manifest,
             "isRollBackToEmbedded": false
           ])
           return
-        }
-        if result["isRollBackToEmbedded"] != nil {
+        case .rollBackToEmbedded:
           promise.resolve([
             "isAvailable": false,
-            "isRollBackToEmbedded": result["isRollBackToEmbedded"]
+            "isRollBackToEmbedded": true
           ])
           return
+        case .error(let error):
+          promise.reject("ERR_UPDATES_CHECK", error.localizedDescription)
+          return
         }
-        promise.resolve(["isAvailable": false, "isRollBackToEmbedded": false])
+      } error: { error in
+        promise.reject(error)
       }
     }
 
     AsyncFunction("getExtraParamsAsync") { (promise: Promise) in
-      guard let updatesService = updatesService,
-        let config = updatesService.config,
-        config.isEnabled else {
-        throw UpdatesDisabledException()
-      }
-
-      guard let scopeKey = config.scopeKey else {
-        throw Exception(name: "ERR_UPDATES_SCOPE_KEY", description: "Muse have scopeKey in config")
-      }
-
-      updatesService.database.databaseQueue.async {
-        do {
-          promise.resolve(try updatesService.database.extraParams(withScopeKey: scopeKey))
-        } catch {
-          promise.reject(error)
-        }
+      AppController.sharedInstance.getExtraParams { extraParams in
+        promise.resolve(extraParams)
+      } error: { error in
+        promise.reject(error)
       }
     }
 
     AsyncFunction("setExtraParamAsync") { (key: String, value: String?, promise: Promise) in
-      guard let updatesService = updatesService,
-        let config = updatesService.config,
-        config.isEnabled else {
-        throw UpdatesDisabledException()
-      }
-
-      guard let scopeKey = config.scopeKey else {
-        throw Exception(name: "ERR_UPDATES_SCOPE_KEY", description: "Muse have scopeKey in config")
-      }
-
-      updatesService.database.databaseQueue.async {
-        do {
-          try updatesService.database.setExtraParam(key: key, value: value, withScopeKey: scopeKey)
-          promise.resolve(nil)
-        } catch {
-          promise.reject(error)
-        }
+      AppController.sharedInstance.setExtraParam(key: key, value: value) {
+        promise.resolve(nil)
+      } error: { error in
+        promise.reject(error)
       }
     }
 
@@ -178,27 +111,40 @@ public final class UpdatesModule: Module {
     }
 
     AsyncFunction("fetchUpdateAsync") { (promise: Promise) in
-      let maybeIsCheckForUpdateEnabled: Bool? = updatesService?.canCheckForUpdateAndFetchUpdate ?? true
-      guard maybeIsCheckForUpdateEnabled ?? false else {
-        promise.reject("ERR_UPDATES_FETCH", "fetchUpdateAsync() is not enabled")
-        return
-      }
-      UpdatesUtils.fetchUpdate { result in
-        if result["message"] != nil {
-          guard let message = result["message"] as? String else {
-            promise.reject("ERR_UPDATES_FETCH", "")
-            return
-          }
-          promise.reject("ERR_UPDATES_FETCH", message)
+      AppController.sharedInstance.fetchUpdate { fetchUpdateResult in
+        switch fetchUpdateResult {
+        case .success(let manifest):
+          promise.resolve([
+            "isNew": true,
+            "isRollBackToEmbedded": false,
+            "manifest": manifest
+          ])
           return
-        } else {
-          promise.resolve(result)
+        case .failure:
+          promise.resolve([
+            "isNew": false,
+            "isRollBackToEmbedded": false
+          ])
+          return
+        case .rollBackToEmbedded:
+          promise.resolve([
+            "isNew": false,
+            "isRollBackToEmbedded": true
+          ])
+          return
+        case .error(let error):
+          promise.reject("ERR_UPDATES_FETCH", error.localizedDescription)
+          return
         }
+      } error: { error in
+        promise.reject(error)
       }
     }
   }
-  // swiftlint:enable cyclomatic_complexity
-}
 
-// swiftlint:enable closure_body_length
-// swiftlint:enable superfluous_else
+  public func onStateMachineContextEvent(context: UpdatesStateContext) {
+    sendEvent(EXUpdatesStateChangeEventName, [
+      "context": context.json
+    ])
+  }
+}

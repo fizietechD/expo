@@ -50,7 +50,7 @@ In order to be able to receive push notifications on the device:
 
 ### Configure for Android
 
-In order to be able to receive push notifications on the device ensure that your project is set up for Firebase. For more information on how to do it, see [this guide](https://docs.expo.dev/guides/setup-native-firebase/#bare-workflow-setup).
+In order to be able to receive push notifications on the device ensure that your project is set up for Firebase. For more information on how to do it, see [this guide](https://docs.expo.dev/guides/using-firebase/#install-and-initialize-react-native-firebase).
 
 This module requires permission to subscribe to device boot. It's used to setup the scheduled notifications right after the device (re)starts. The `RECEIVE_BOOT_COMPLETED` permission is added automatically.
 
@@ -126,7 +126,7 @@ This module requires permission to subscribe to device boot. It's used to setup 
 
 ### Config plugin setup (optional)
 
-If you're using EAS Build, you can set your Android notification icon and color tint, add custom push notification sounds, and set your iOS notification environment using the expo-notifications config plugin ([what's a config plugin?](https://docs.expo.dev/home/config-plugins/introduction)). To setup, just add the config plugin to the plugins array of your `app.json` or `app.config.js` as shown below, then rebuild the app.
+If you're using EAS Build, you can set your Android notification icon and color tint, add custom push notification sounds, and set your iOS notification environment using the expo-notifications config plugin ([what's a config plugin?](https://docs.expo.dev/config-plugins/introduction)). To setup, just add the config plugin to the plugins array of your `app.json` or `app.config.js` as shown below, then rebuild the app.
 
 ```json
 {
@@ -517,7 +517,7 @@ A single and required argument is a subscription returned by `addPushTokenListen
 
 ## Listening to notification events
 
-Notification events include incoming notifications, interactions your users perform with notifications (this can be tapping on a notification, or interacting with it via [notification categories](#managing-notification-categories-interactive-notifications)), and rare occasions when your notifications may be dropped.
+Notification events include incoming notifications, interactions your users perform with notifications (this can be tapping on a notification, or interacting with it via [notification categories](#manage-notification-categories-interactive-notifications)), and rare occasions when your notifications may be dropped.
 
 A few different listeners are exposed, so we've provided a chart below which will hopefully help you understand when you can expect each one to be triggered:
 
@@ -825,7 +825,6 @@ An optional object of conforming to the following interface:
     allowCriticalAlerts?: boolean;
     provideAppNotificationSettings?: boolean;
     allowProvisional?: boolean;
-    allowAnnouncements?: boolean;
   }
 }
 ```
@@ -849,7 +848,6 @@ export function requestPermissionsAsync() {
       allowAlert: true,
       allowBadge: true,
       allowSound: true,
-      allowAnnouncements: true,
     },
   });
 }
