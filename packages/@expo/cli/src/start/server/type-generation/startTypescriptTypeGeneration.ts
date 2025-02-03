@@ -3,17 +3,17 @@ import fs from 'fs/promises';
 import { Server } from 'metro';
 import path from 'path';
 
-import { upsertGitIgnoreContents, removeFromGitIgnore } from '../../../utils/mergeGitIgnorePaths';
-import { ensureDotExpoProjectDirectoryInitialized } from '../../project/dotExpo';
-import { ServerLike } from '../BundlerDevServer';
-import { getRouterDirectory } from '../metro/router';
 import { removeExpoEnvDTS, writeExpoEnvDTS } from './expo-env';
 import { setupTypedRoutes } from './routes';
 import { forceRemovalTSConfig, forceUpdateTSConfig } from './tsconfig';
+import { upsertGitIgnoreContents } from '../../../utils/mergeGitIgnorePaths';
+import { ensureDotExpoProjectDirectoryInitialized } from '../../project/dotExpo';
+import { ServerLike } from '../BundlerDevServer';
+import { getRouterDirectoryModuleIdWithManifest } from '../metro/router';
 
 export interface TypeScriptTypeGenerationOptions {
-  server: ServerLike;
-  metro: Server | null;
+  server?: ServerLike;
+  metro?: Server | null;
   projectRoot: string;
 }
 
@@ -30,12 +30,7 @@ export async function startTypescriptTypeGenerationAsync({
   // If typed routes are disabled, remove any files that were added.
   if (!exp.experiments?.typedRoutes) {
     debug('Removing typed routes side-effects (experiments.typedRoutes: false)');
-    const gitIgnorePath = path.join(projectRoot, '.gitignore');
-    await Promise.all([
-      forceRemovalTSConfig(projectRoot),
-      removeExpoEnvDTS(projectRoot),
-      removeFromGitIgnore(gitIgnorePath, 'expo-env.d.ts'),
-    ]);
+    await Promise.all([forceRemovalTSConfig(projectRoot), removeExpoEnvDTS(projectRoot)]);
   } else {
     const dotExpoDir = ensureDotExpoProjectDirectoryInitialized(projectRoot);
     const typesDirectory = path.resolve(dotExpoDir, './types');
@@ -56,7 +51,11 @@ export async function startTypescriptTypeGenerationAsync({
         server,
         typesDirectory,
         projectRoot,
-        routerDirectory: exp.extra?.router?.unstable_src ?? getRouterDirectory(projectRoot),
+        routerDirectory: path.join(
+          projectRoot,
+          getRouterDirectoryModuleIdWithManifest(projectRoot, exp)
+        ),
+        plugin: exp?.extra?.router,
       }),
     ]);
   }

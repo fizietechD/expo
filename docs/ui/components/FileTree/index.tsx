@@ -1,47 +1,88 @@
-import { FileCode01Icon, LayoutAlt01Icon, FolderIcon } from '@expo/styleguide-icons';
+import { FileCode01Icon } from '@expo/styleguide-icons/outline/FileCode01Icon';
+import { FolderIcon } from '@expo/styleguide-icons/outline/FolderIcon';
+import { LayoutAlt01Icon } from '@expo/styleguide-icons/outline/LayoutAlt01Icon';
+import { PackageIcon } from '@expo/styleguide-icons/outline/PackageIcon';
 import { HTMLAttributes, ReactNode } from 'react';
 
+import { TextWithNote } from './TextWithNote';
+
 type FileTreeProps = HTMLAttributes<HTMLDivElement> & {
-  files?: string[];
+  files?: (string | [string, string])[];
 };
 
 type FileObject = {
-  [key: string]: FileObject;
+  name: string;
+  note?: string;
+  files: FileObject[];
 };
 
 export function FileTree({ files = [], ...rest }: FileTreeProps) {
   return (
-    <div className="text-xs border border-default rounded-md bg-default mb-4 p-2 pb-4" {...rest}>
+    <div
+      className="mb-4 overflow-x-auto whitespace-nowrap rounded-md border border-default bg-default p-2 pb-4 pr-4 text-xs"
+      {...rest}>
       {renderStructure(generateStructure(files))}
     </div>
   );
 }
 
-function generateStructure(files: string[]): FileObject {
-  const structure = {};
-  files.forEach(path =>
-    path.split('/').reduce((acc: FileObject, key) => acc[key] ?? (acc[key] = {}), structure)
-  );
+/**
+ * Given an array of file paths, generate a tree structure.
+ * @param files
+ * @returns
+ */
+function generateStructure(files: FileTreeProps['files'] = []): FileObject[] {
+  const structure: FileObject[] = [];
+
+  function modifyPath(path: string, note?: string) {
+    const parts = path.split('/');
+    let currentLevel = structure;
+    parts.forEach((part, index) => {
+      const existingPath = currentLevel.find(item => item.name === part);
+      if (existingPath) {
+        currentLevel = existingPath.files;
+      } else {
+        const newPart: FileObject = {
+          name: part,
+          files: [],
+        };
+        if (note && index === parts.length - 1) {
+          newPart.note = note;
+        }
+        currentLevel.push(newPart);
+        currentLevel = newPart.files;
+      }
+    });
+  }
+
+  files.forEach(path => {
+    if (Array.isArray(path)) {
+      modifyPath(path[0], path[1]);
+    } else {
+      modifyPath(path);
+    }
+  });
+
   return structure;
 }
 
-function renderStructure(structure: FileObject, level = 0): ReactNode {
-  return Object.entries(structure).map(([key, value]) => {
-    const FileIcon = getIconForFile(key);
-    return Object.keys(value).length ? (
-      <div className="mt-1 pt-1 px-2 rounded-sm flex flex-col">
+function renderStructure(structure: FileObject[], level = 0): ReactNode {
+  return structure.map(({ name, note, files }, index) => {
+    const FileIcon = getIconForFile(name);
+    return files.length ? (
+      <div key={name + '_' + index} className="mt-1 flex flex-col rounded-sm pl-2 pt-1">
         <div className="flex items-center">
           {' '.repeat(level)}
-          <FolderIcon className="text-icon-tertiary mr-2 opacity-60" />
-          <code className="text-secondary">{key}</code>
+          <FolderIcon className="mr-2 min-w-[20px] text-icon-tertiary opacity-60" />
+          <TextWithNote name={name} note={note} className="text-secondary" />
         </div>
-        {renderStructure(value, level + 1)}
+        {renderStructure(files, level + 1)}
       </div>
     ) : (
-      <div className="mt-1 pl-3 pt-1 px-2 rounded-sm flex items-center">
-        {' '.repeat(Math.max(level - 1, 0))}
-        <FileIcon className="text-icon-tertiary mr-2" />
-        <code className="text-default">{key}</code>
+      <div key={name + '_' + index} className="mt-1 flex items-center rounded-sm pl-2 pt-1">
+        {' '.repeat(Math.max(level, 0))}
+        <FileIcon className="mr-2 min-w-[20px] text-icon-tertiary" />
+        <TextWithNote name={name} note={note} className="text-default" />
       </div>
     );
   });
@@ -50,6 +91,9 @@ function renderStructure(structure: FileObject, level = 0): ReactNode {
 function getIconForFile(filename: string) {
   if (/_layout\.[jt]sx?/.test(filename)) {
     return LayoutAlt01Icon;
+  }
+  if (filename.startsWith('expo-')) {
+    return PackageIcon;
   }
   return FileCode01Icon;
 }

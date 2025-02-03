@@ -1,17 +1,18 @@
 import { mergeClasses, SnackLogo } from '@expo/styleguide';
-import { ArrowUpRightIcon } from '@expo/styleguide-icons';
+import { ArrowUpRightIcon } from '@expo/styleguide-icons/outline/ArrowUpRightIcon';
 import { useEffect, useRef, useState, PropsWithChildren } from 'react';
+
+import { cleanCopyValue, getCodeBlockDataFromChildren } from '~/common/code-utilities';
+import { SNACK_URL, getSnackFiles } from '~/common/snack';
+import { usePageApiVersion } from '~/providers/page-api-version';
+import versions from '~/public/static/constants/versions.json';
+import { CopyAction } from '~/ui/components/Snippet/actions/CopyAction';
+import { SettingsAction } from '~/ui/components/Snippet/actions/SettingsAction';
 
 import { Snippet } from '../Snippet';
 import { SnippetAction } from '../SnippetAction';
 import { SnippetContent } from '../SnippetContent';
 import { SnippetHeader } from '../SnippetHeader';
-
-import { SNACK_URL, getSnackFiles } from '~/common/snack';
-import { cleanCopyValue } from '~/components/base/code';
-import { PageApiVersionContextType, usePageApiVersion } from '~/providers/page-api-version';
-import versions from '~/public/static/constants/versions.json';
-import { CopyAction } from '~/ui/components/Snippet/actions/CopyAction';
 
 const DEFAULT_PLATFORM = 'android';
 const { LATEST_VERSION } = versions;
@@ -23,7 +24,6 @@ type Props = PropsWithChildren<{
   templateId?: string;
   files?: Record<string, string>;
   platforms?: string[];
-  buttonTitle?: string;
   contentHidden?: boolean;
 }>;
 
@@ -34,7 +34,6 @@ export const SnackInline = ({
   templateId,
   files,
   platforms,
-  buttonTitle,
   contentHidden,
   children,
 }: Props) => {
@@ -42,14 +41,16 @@ export const SnackInline = ({
   const [isReady, setReady] = useState(false);
   const context = usePageApiVersion();
 
-  useEffect(() => setReady(true), []);
+  useEffect(() => {
+    setReady(true);
+  }, []);
 
   // Filter out `latest` and use the concrete latest version instead. We want to
   // keep `unversioned` in for the selected docs version though. This is used to
   // find the examples in the static dir, and we don't have a `latest` version
   // there, but we do have `unversioned`.
   const getSelectedDocsVersion = () => {
-    const { version } = context as PageApiVersionContextType;
+    const { version } = context;
     return version === 'latest' ? LATEST_VERSION : version;
   };
 
@@ -68,17 +69,14 @@ export const SnackInline = ({
     return `${document.location.origin}/static/examples/${getSelectedDocsVersion()}`;
   };
 
-  const getCode = () => {
-    const code = contentRef.current ? contentRef.current.textContent || '' : '';
-    return code.replace(/%%placeholder-start%%.*%%placeholder-end%%/g, '');
-  };
+  const { language, value } = getCodeBlockDataFromChildren(children);
 
   return (
-    <Snippet className="flex flex-col mb-3 prose-pre:!m-0 prose-pre:!border-0">
-      <SnippetHeader title={label || 'Example'} Icon={SnackLogo}>
+    <Snippet className="mb-3 flex flex-col prose-pre:!m-0 prose-pre:!border-0">
+      <SnippetHeader title={label ?? 'Example'} Icon={SnackLogo}>
         <form action={SNACK_URL} method="POST" target="_blank" className="contents">
-          <input type="hidden" name="platform" value={defaultPlatform || DEFAULT_PLATFORM} />
-          <input type="hidden" name="name" value={label || 'Example'} />
+          <input type="hidden" name="platform" value={defaultPlatform ?? DEFAULT_PLATFORM} />
+          <input type="hidden" name="name" value={label ?? 'Example'} />
           <input type="hidden" name="dependencies" value={dependencies.join(',')} />
           <input type="hidden" name="sdkVersion" value={getSnackSdkVersion()} />
           {platforms && (
@@ -91,20 +89,22 @@ export const SnackInline = ({
               value={JSON.stringify(
                 getSnackFiles({
                   templateId,
-                  code: getCode(),
+                  code: value,
                   files,
                   baseURL: getExamplesPath(),
+                  codeLanguage: language,
                 })
               )}
             />
           )}
-          <CopyAction text={cleanCopyValue(getCode())} />
+          <CopyAction text={cleanCopyValue(value)} />
           <SnippetAction
             disabled={!isReady}
             rightSlot={<ArrowUpRightIcon className="icon-sm text-icon-secondary" />}
             type="submit">
-            {buttonTitle || 'Open in Snack'}
+            <span className="max-md-gutters:hidden">Open in </span>Snack
           </SnippetAction>
+          <SettingsAction />
         </form>
       </SnippetHeader>
       <SnippetContent ref={contentRef} className={mergeClasses('p-0', contentHidden && 'hidden')}>

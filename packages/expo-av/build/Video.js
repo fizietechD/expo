@@ -8,6 +8,7 @@ import { ResizeMode, } from './Video.types';
 const _STYLES = StyleSheet.create({
     base: {
         overflow: 'hidden',
+        pointerEvents: 'box-none',
     },
     poster: {
         position: 'absolute',
@@ -25,6 +26,7 @@ const _STYLES = StyleSheet.create({
         bottom: 0,
     },
 });
+let didWarnAboutVideoDeprecation = false;
 // On a real device UIManager should be present, however when running offline tests with jest-expo
 // we have to use the provided native module mock to access constants
 const ExpoVideoManagerConstants = ExpoVideoManager;
@@ -206,9 +208,10 @@ class Video extends React.Component {
     };
     _renderPoster = () => {
         const PosterComponent = this.props.PosterComponent ?? Image;
-        return this.props.usePoster && this.state.showPoster ? (React.createElement(PosterComponent, { style: [_STYLES.poster, this.props.posterStyle], source: this.props.posterSource })) : null;
+        return this.props.usePoster && this.state.showPoster ? (<PosterComponent style={[_STYLES.poster, this.props.posterStyle]} source={this.props.posterSource}/>) : null;
     };
     render() {
+        maybeWarnAboutVideoDeprecation();
         const source = getNativeSourceFromSource(this.props.source) || undefined;
         let nativeResizeMode = ExpoVideoManagerConstants.ScaleNone;
         if (this.props.resizeMode) {
@@ -261,9 +264,10 @@ class Video extends React.Component {
             onReadyForDisplay: this._nativeOnReadyForDisplay,
             onFullscreenUpdate: this._nativeOnFullscreenUpdate,
         };
-        return (React.createElement(View, { style: nativeProps.style, pointerEvents: "box-none" },
-            React.createElement(ExponentVideo, { ref: this._nativeRef, ...nativeProps, style: nativeProps.videoStyle }),
-            this._renderPoster()));
+        return (<View style={nativeProps.style}>
+        <ExponentVideo ref={this._nativeRef} {...nativeProps} style={nativeProps.videoStyle}/>
+        {this._renderPoster()}
+      </View>);
     }
 }
 function omit(props, propNames) {
@@ -272,6 +276,13 @@ function omit(props, propNames) {
         delete copied[propName];
     }
     return copied;
+}
+function maybeWarnAboutVideoDeprecation() {
+    if (__DEV__ && !didWarnAboutVideoDeprecation) {
+        didWarnAboutVideoDeprecation = true;
+        console.log('⚠️ \x1b[33m[expo-av]: Video component from `expo-av` is deprecated in favor of `expo-video`. ' +
+            'See the documentation at https://docs.expo.dev/versions/latest/sdk/video/ for the new API reference.');
+    }
 }
 Object.assign(Video.prototype, PlaybackMixin);
 // note(simek): TypeDoc cannot resolve correctly name of inline and default exported class

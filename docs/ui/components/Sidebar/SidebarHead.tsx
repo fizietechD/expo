@@ -1,18 +1,16 @@
-import { css } from '@emotion/react';
-import { theme, DocsLogo } from '@expo/styleguide';
-import { spacing } from '@expo/styleguide-base';
-import {
-  ArrowLeftIcon,
-  GraduationHat02DuotoneIcon,
-  Stars02DuotoneIcon,
-  Home02DuotoneIcon,
-  BookOpen02DuotoneIcon,
-} from '@expo/styleguide-icons';
+import { DocsLogo, LinkBase } from '@expo/styleguide';
+import { PlanEnterpriseIcon } from '@expo/styleguide-icons/custom/PlanEnterpriseIcon';
+import { BookOpen02DuotoneIcon } from '@expo/styleguide-icons/duotone/BookOpen02DuotoneIcon';
+import { GraduationHat02DuotoneIcon } from '@expo/styleguide-icons/duotone/GraduationHat02DuotoneIcon';
+import { Home02DuotoneIcon } from '@expo/styleguide-icons/duotone/Home02DuotoneIcon';
+import { Stars02DuotoneIcon } from '@expo/styleguide-icons/duotone/Stars02DuotoneIcon';
+import { ArrowLeftIcon } from '@expo/styleguide-icons/outline/ArrowLeftIcon';
 
 import { shouldShowFeaturePreviewLink } from '~/constants/FeatureFlags.cjs';
 import { Search } from '~/ui/components/Search';
 import { SidebarSingleEntry } from '~/ui/components/Sidebar/SidebarSingleEntry';
-import { A } from '~/ui/components/Text';
+
+import { ApiVersionSelect } from './ApiVersionSelect';
 
 type SidebarHeadProps = {
   sidebarActiveGroup: string;
@@ -21,66 +19,61 @@ type SidebarHeadProps = {
 export const SidebarHead = ({ sidebarActiveGroup }: SidebarHeadProps) => {
   if (sidebarActiveGroup === 'archive') {
     return (
-      <div css={sidebarHeadContainerStyle}>
-        <A isStyled href="/" css={sidebarBackLinkStyle}>
+      <div className="flex flex-col gap-0.5 border-b border-default bg-default p-1.5">
+        <LinkBase
+          href="/"
+          className="flex items-center gap-3 rounded-md p-2.5 text-secondary hocus:bg-element">
           <ArrowLeftIcon className="text-icon-secondary" />
           Back
-        </A>
+        </LinkBase>
       </div>
     );
   }
 
   return (
-    <div css={sidebarHeadContainerStyle}>
-      <Search />
-      <SidebarSingleEntry
-        href="/"
-        title="Home"
-        Icon={Home02DuotoneIcon}
-        isActive={sidebarActiveGroup === 'home'}
-      />
-      <SidebarSingleEntry
-        href="/workflow/customizing"
-        title="Guides"
-        Icon={BookOpen02DuotoneIcon}
-        isActive={sidebarActiveGroup === 'general'}
-      />
-      <SidebarSingleEntry
-        href="/versions/latest"
-        title="Reference"
-        Icon={DocsLogo}
-        isActive={sidebarActiveGroup === 'reference'}
-      />
-      <SidebarSingleEntry
-        href="/tutorial/introduction/"
-        title="Learn"
-        Icon={GraduationHat02DuotoneIcon}
-        isActive={sidebarActiveGroup === 'learn'}
-      />
-      {shouldShowFeaturePreviewLink() && (
+    <>
+      <div className="flex flex-col gap-0.5 border-b border-default bg-default p-4">
+        <Search />
         <SidebarSingleEntry
-          href="/feature-preview"
-          title="Feature Preview"
-          Icon={Stars02DuotoneIcon}
-          isActive={sidebarActiveGroup === 'featurePreview' || sidebarActiveGroup === 'preview'}
+          href="/"
+          title="Home"
+          Icon={Home02DuotoneIcon}
+          isActive={sidebarActiveGroup === 'home'}
         />
-      )}
-    </div>
+        <SidebarSingleEntry
+          href="/guides/overview/"
+          title="Guides"
+          Icon={BookOpen02DuotoneIcon}
+          isActive={sidebarActiveGroup === 'general'}
+        />
+        <SidebarSingleEntry
+          href="/eas/"
+          title="EAS"
+          Icon={PlanEnterpriseIcon}
+          isActive={sidebarActiveGroup === 'eas'}
+        />
+        <SidebarSingleEntry
+          href="/versions/latest/"
+          title="Reference"
+          Icon={DocsLogo}
+          isActive={sidebarActiveGroup === 'reference'}
+        />
+        <SidebarSingleEntry
+          href="/tutorial/overview/"
+          title="Learn"
+          Icon={GraduationHat02DuotoneIcon}
+          isActive={sidebarActiveGroup === 'learn'}
+        />
+        {shouldShowFeaturePreviewLink() && (
+          <SidebarSingleEntry
+            href="/feature-preview/"
+            title="Feature Preview"
+            Icon={Stars02DuotoneIcon}
+            isActive={sidebarActiveGroup === 'featurePreview' || sidebarActiveGroup === 'preview'}
+          />
+        )}
+      </div>
+      <ApiVersionSelect />
+    </>
   );
 };
-
-const sidebarHeadContainerStyle = css({
-  display: 'flex',
-  flexDirection: 'column',
-  padding: spacing[4],
-  borderBottom: `1px solid ${theme.border.default}`,
-  background: theme.background.default,
-  gap: spacing[0.5],
-});
-
-const sidebarBackLinkStyle = css({
-  color: theme.text.secondary,
-  display: 'flex',
-  gap: spacing[3],
-  alignItems: 'center',
-});

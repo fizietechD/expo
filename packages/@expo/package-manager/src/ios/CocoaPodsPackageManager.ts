@@ -5,15 +5,17 @@ import { Ora } from 'ora';
 import os from 'os';
 import path from 'path';
 
-import { spawnSudoAsync } from '../utils/spawn';
-
 export type CocoaPodsErrorCode = 'NON_INTERACTIVE' | 'NO_CLI' | 'COMMAND_FAILED';
 
 export class CocoaPodsError extends Error {
   readonly name = 'CocoaPodsError';
   readonly isPackageManagerError = true;
 
-  constructor(message: string, public code: CocoaPodsErrorCode, public cause?: Error) {
+  constructor(
+    message: string,
+    public code: CocoaPodsErrorCode,
+    public cause?: Error
+  ) {
     super(cause ? `${message}\n└─ Cause: ${cause.message}` : message);
   }
 }
@@ -65,7 +67,10 @@ export class CocoaPodsPackageManager {
         );
       }
       // If the user doesn't have permission then we can prompt them to use sudo.
-      await spawnSudoAsync(['gem', ...options], spawnOptions);
+      console.log(
+        'Your password might be needed to install CocoaPods CLI: https://guides.cocoapods.org/using/getting-started.html#installation'
+      );
+      await spawnAsync('sudo', ['gem', ...options], spawnOptions);
     }
   }
 

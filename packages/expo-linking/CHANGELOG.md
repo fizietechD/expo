@@ -6,9 +6,93 @@
 
 ### 🎉 New features
 
+- [iOS] Add basic support for App Clips. ([#34327](https://github.com/expo/expo/pull/34327) by [@EvanBacon](https://github.com/EvanBacon))
+
 ### 🐛 Bug fixes
 
 ### 💡 Others
+
+- [Android] Started using expo modules gradle plugin. ([#34176](https://github.com/expo/expo/pull/34176) by [@lukmccall](https://github.com/lukmccall))
+- [apple] Migrate remaining `expo-module.config.json` to unified platform syntax. ([#34445](https://github.com/expo/expo/pull/34445) by [@reichhartd](https://github.com/reichhartd))
+
+## 7.0.3 — 2024-11-19
+
+### 🐛 Bug fixes
+
+- [iOS] Fix `addEventListener` and `useURL` hook. ([#33076](https://github.com/expo/expo/pull/33076) by [@gabrieldonadel](https://github.com/gabrieldonadel))
+
+## 7.0.2 — 2024-10-25
+
+_This version does not introduce any user-facing changes._
+
+## 7.0.1 — 2024-10-24
+
+### 🐛 Bug fixes
+
+- [iOS] Add tvOS to podspec. ([#32255](https://github.com/expo/expo/pull/32255) by [@douglowder](https://github.com/douglowder))
+
+## 7.0.0 — 2024-10-22
+
+### 🛠 Breaking changes
+
+- Bumped iOS deployment target to 15.1. ([#30840](https://github.com/expo/expo/pull/30840) by [@tsapeta](https://github.com/tsapeta))
+
+### 🎉 New features
+
+- Add shims for `react-server` environments. ([#31622](https://github.com/expo/expo/pull/31622) by [@EvanBacon](https://github.com/EvanBacon))
+- Add native `getLinkingURL` function. ([#29405](https://github.com/expo/expo/pull/29405) by [@aleqsio](https://github.com/aleqsio))
+
+### 🐛 Bug fixes
+
+- Add missing `react` and `react-native` peer dependencies for isolated modules. ([#30473](https://github.com/expo/expo/pull/30473) by [@byCedric](https://github.com/byCedric))
+
+### 💡 Others
+
+- Standardized Babel configuration to use `expo-module-scripts`. ([#31915](https://github.com/expo/expo/pull/31915) by [@reichhartd](https://github.com/reichhartd))
+
+## 6.3.1 — 2024-04-23
+
+_This version does not introduce any user-facing changes._
+
+## 6.3.0 — 2024-04-18
+
+_This version does not introduce any user-facing changes._
+
+## 6.2.2 - 2024-01-12
+
+_This version does not introduce any user-facing changes._
+
+## 6.2.1 — 2023-12-12
+
+_This version does not introduce any user-facing changes._
+
+## 6.2.0 — 2023-11-14
+
+### 💡 Others
+
+- Migrate to new standard `URL` support on native. ([#24941](https://github.com/expo/expo/pull/24941) by [@EvanBacon](https://github.com/EvanBacon))
+
+## 6.1.1 — 2023-10-17
+
+_This version does not introduce any user-facing changes._
+
+## 6.1.0 — 2023-09-15
+
+### 🛠 Breaking changes
+
+- Remove deprecated `makeUrl` function. ([#24300](https://github.com/expo/expo/pull/24300) by [@EvanBacon](https://github.com/EvanBacon))
+
+### 🐛 Bug fixes
+
+- Fix parsing web URLs with `+` symbols in the pathname. ([#24300](https://github.com/expo/expo/pull/24300) by [@EvanBacon](https://github.com/EvanBacon))
+
+### 💡 Others
+
+- Reduce bundle size on web. ([#24300](https://github.com/expo/expo/pull/24300) by [@EvanBacon](https://github.com/EvanBacon))
+
+## 6.0.0 — 2023-08-02
+
+_This version does not introduce any user-facing changes._
 
 ## 5.0.2 — 2023-06-24
 

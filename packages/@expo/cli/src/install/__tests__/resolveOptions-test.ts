@@ -31,7 +31,9 @@ describe(resolveArgsAsync, () => {
         yarn: true,
         check: false,
         pnpm: false,
+        bun: false,
         fix: false,
+        dev: false,
       },
       extras: ['--npm', '-g', 'not-a-plugin'],
     });
@@ -45,7 +47,9 @@ describe(resolveArgsAsync, () => {
         yarn: false,
         check: true,
         pnpm: false,
+        bun: false,
         fix: false,
+        dev: false,
       },
       extras: [],
     });

@@ -53,41 +53,34 @@ class DevLauncherInternalModule(reactContext: ReactApplicationContext?) :
     return mapOf(
       "installationID" to installationIDHelper.getOrCreateInstallationID(reactApplicationContext),
       "isDevice" to !isRunningOnEmulator,
-      "updatesConfig" to getUpdatesConfig(),
+      "updatesConfig" to getUpdatesConfig()
     )
   }
 
   private fun getUpdatesConfig(): WritableMap {
     val map = Arguments.createMap()
 
-    val runtimeVersion = DevLauncherController.getMetadataValue(reactApplicationContext, "expo.modules.updates.EXPO_RUNTIME_VERSION")
-    val sdkVersion = DevLauncherController.getMetadataValue(reactApplicationContext, "expo.modules.updates.EXPO_SDK_VERSION")
-    var projectUrl = DevLauncherController.getMetadataValue(reactApplicationContext, "expo.modules.updates.EXPO_UPDATE_URL")
-
-    val appId = if (projectUrl.isNotEmpty()) {
-      Uri.parse(projectUrl).lastPathSegment ?: ""
-    } else {
-      ""
-    }
+    val runtimeVersion = controller.updatesInterface?.runtimeVersion
+    val projectUrl = DevLauncherController.getMetadataValue(reactApplicationContext, "expo.modules.updates.EXPO_UPDATE_URL")
 
     val projectUri = Uri.parse(projectUrl)
+    val appId = projectUri?.lastPathSegment ?: ""
 
-    val isModernManifestProtocol = projectUri.host.equals("u.expo.dev") || projectUri.host.equals("staging-u.expo.dev")
+    val isModernManifestProtocol = projectUri?.host.equals("u.expo.dev") || projectUri?.host.equals("staging-u.expo.dev")
     val usesEASUpdates = isModernManifestProtocol && appId.isNotEmpty()
 
     return map.apply {
       putString("appId", appId)
       putString("runtimeVersion", runtimeVersion)
-      putString("sdkVersion", sdkVersion)
       putBoolean("usesEASUpdates", usesEASUpdates)
-      putString("projectUrl", projectUrl)
+      putString("projectUrl", projectUri.toString())
     }
   }
 
   private fun sanitizeUrlString(url: String): Uri {
     var sanitizedUrl = url.trim()
     // If the url does contain a scheme use "http://"
-    if(!sanitizedUrl.contains("://")) {
+    if (!sanitizedUrl.contains("://")) {
       sanitizedUrl = "http://" + sanitizedUrl
     }
 
@@ -233,16 +226,14 @@ class DevLauncherInternalModule(reactContext: ReactApplicationContext?) :
     val packageInfo = packageManager.getPackageInfo(packageName, 0)
     val applicationInfo = packageManager.getApplicationInfo(packageName, PackageManager.GET_META_DATA)
     val appName = packageManager.getApplicationLabel(applicationInfo).toString()
-    val runtimeVersion = DevLauncherController.getMetadataValue(reactApplicationContext, "expo.modules.updates.EXPO_RUNTIME_VERSION")
-    val sdkVersion = DevLauncherController.getMetadataValue(reactApplicationContext, "expo.modules.updates.EXPO_SDK_VERSION")
-    var appIcon = getApplicationIconUri()
+    val runtimeVersion = controller.updatesInterface?.runtimeVersion
+    val appIcon = getApplicationIconUri()
 
-    var updatesUrl = DevLauncherController.getMetadataValue(reactApplicationContext, "expo.modules.updates.EXPO_UPDATE_URL")
-    var appId = ""
-
-    if (updatesUrl.isNotEmpty()) {
-      var uri = Uri.parse(updatesUrl)
-      appId = uri.lastPathSegment ?: ""
+    val updatesUrl = controller.updatesInterface?.updateUrl
+    val appId = if (updatesUrl !== null) {
+      updatesUrl.lastPathSegment ?: ""
+    } else {
+      ""
     }
 
     map.apply {
@@ -251,7 +242,6 @@ class DevLauncherInternalModule(reactContext: ReactApplicationContext?) :
       putString("appName", appName)
       putString("appIcon", appIcon)
       putString("runtimeVersion", runtimeVersion)
-      putString("sdkVersion", sdkVersion)
     }
 
     promise.resolve(map)

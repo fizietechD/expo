@@ -1,10 +1,11 @@
+import { useEvent } from 'expo';
 import * as AppleAuthentication from 'expo-apple-authentication';
-import { Video } from 'expo-av';
 import { BlurView } from 'expo-blur';
-import { Camera, CameraType } from 'expo-camera';
+import { CameraView, useCameraPermissions, CameraType } from 'expo-camera';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useRef, useState } from 'react';
+import { useVideoPlayer, VideoView } from 'expo-video';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Button,
   SafeAreaView,
@@ -16,51 +17,67 @@ import {
   TouchableOpacity,
   Platform,
   Alert,
+  Appearance,
+  PlatformColor,
 } from 'react-native';
 
 function randomColor() {
   return '#' + ((Math.random() * 0xffffff) << 0).toString(16).padStart(6, '0');
 }
 
-export default class App extends React.PureComponent {
-  render() {
-    const isFabricEnabled = global.nativeFabricUIManager != null;
+function randomGradientColors() {
+  return Array(3).fill(0).map(randomColor) as unknown as readonly [string, string, string];
+}
 
-    return (
-      <SafeAreaView style={styles.container}>
-        <ScrollView>
-          <Text style={[styles.text, { marginVertical: 10 }]}>
-            isFabricEnabled: {isFabricEnabled + ''}
-          </Text>
+export default function App() {
+  const [colorScheme, setColorScheme] = useState(Appearance.getColorScheme());
+  const isFabricEnabled = global.nativeFabricUIManager != null;
 
-          <ImageExample />
-          <LinearGradientExample />
-          {Platform.OS === 'ios' && <BlurExample />}
-          <VideoExample />
-          <CameraExample />
-          <AppleAuthenticationExample />
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
+  useEffect(() => {
+    const listener = Appearance.addChangeListener((preferences) => {
+      setColorScheme(preferences.colorScheme);
+    });
+
+    return listener.remove;
+  }, []);
+
+  return (
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colorScheme === 'light' ? '#fff' : '#161b22' }]}>
+      <ScrollView>
+        <Text style={[styles.text, { marginVertical: 10 }]}>
+          isFabricEnabled: {isFabricEnabled + ''}
+        </Text>
+
+        <ImageExample />
+        <LinearGradientExample />
+        {Platform.OS === 'ios' && <BlurExample />}
+        <VideoExample />
+        <CameraExample />
+        <AppleAuthenticationExample />
+      </ScrollView>
+    </SafeAreaView>
+  );
 }
 
 export function ImageExample() {
   const [seed] = useState(100 + Math.round(Math.random() * 100));
 
+  const uri = `https://picsum.photos/id/${seed}/1000/1000`;
+
   return (
     <View style={styles.exampleContainer}>
-      <Image style={styles.image} source={{ uri: `https://picsum.photos/id/${seed}/1000/1000` }} />
+      <Image style={styles.image} source={{ uri }} />
     </View>
   );
 }
 
 export function LinearGradientExample() {
   const [mounted, setMounted] = useState(true);
-  const [colors, setColors] = useState(() => Array(3).fill(0).map(randomColor));
+  const [colors, setColors] = useState(randomGradientColors());
 
   const toggleMounted = useCallback(() => setMounted(!mounted), [mounted]);
-  const randomizeColors = useCallback(() => setColors(Array(3).fill(0).map(randomColor)), [colors]);
+  const randomizeColors = useCallback(() => setColors(randomGradientColors()), [colors]);
 
   return (
     <View style={styles.exampleContainer}>
@@ -97,54 +114,36 @@ export function BlurExample() {
 }
 
 export function VideoExample() {
-  const video = useRef(null);
-  const [status, setStatus] = useState({});
-  const [nativeControls, setNativeControls] = useState(true);
+  const videoSource =
+    'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4';
+  const player = useVideoPlayer(videoSource, (player) => {
+    player.loop = true;
+  });
+
+  const status = useEvent(player, 'playingChange', { isPlaying: player.playing });
 
   const togglePlaying = useCallback(() => {
     if (status.isPlaying) {
-      video.current.pauseAsync();
+      player.pause();
     } else {
-      video.current.playAsync();
+      player.play();
     }
   }, [status.isPlaying]);
 
-  const toggleNativeControls = useCallback(
-    () => setNativeControls(!nativeControls),
-    [nativeControls]
-  );
-
-  const setFullscreen = useCallback(() => video.current.presentFullscreenPlayer(true), [video]);
-
   return (
     <View style={[styles.exampleContainer, styles.videoExample]}>
-      <Video
-        ref={video}
-        style={styles.video}
-        source={{
-          uri: 'https://d23dyxeqlo5psv.cloudfront.net/big_buck_bunny.mp4',
-        }}
-        useNativeControls={nativeControls}
-        resizeMode="contain"
-        isLooping
-        onPlaybackStatusUpdate={(status) => setStatus(() => status)}
-      />
+      <VideoView style={styles.video} player={player} allowsFullscreen allowsPictureInPicture />
       <View style={styles.buttons}>
         <Button title={status.isPlaying ? 'Pause' : 'Play'} onPress={togglePlaying} />
-        <Button
-          title={nativeControls ? 'Hide controls' : 'Show controls'}
-          onPress={toggleNativeControls}
-        />
-        <Button title="Open fullscreen" onPress={setFullscreen} />
       </View>
     </View>
   );
 }
 
 export function CameraExample() {
-  const [cameraPermissionStatus, requestCameraPermission] = Camera.useCameraPermissions();
-  const camera = useRef<Camera>(null);
-  const [cameraType, setCameraType] = useState(CameraType.back);
+  const [cameraPermissionStatus, requestCameraPermission] = useCameraPermissions();
+  const camera = useRef<CameraView>(null);
+  const [cameraType, setCameraType] = useState<CameraType>('back');
 
   const takePicture = useCallback(async () => {
     const result = await camera.current.takePictureAsync({
@@ -154,7 +153,7 @@ export function CameraExample() {
   }, []);
 
   const reverse = useCallback(() => {
-    setCameraType(cameraType === CameraType.back ? CameraType.front : CameraType.back);
+    setCameraType(cameraType === 'back' ? 'front' : 'back');
   }, [cameraType]);
 
   const onCameraReady = useCallback(() => {
@@ -168,16 +167,20 @@ export function CameraExample() {
 
   return (
     <View style={styles.exampleContainer}>
-      <Camera ref={camera} style={styles.camera} type={cameraType} onCameraReady={onCameraReady}>
+      <CameraView
+        ref={camera}
+        style={styles.camera}
+        facing={cameraType}
+        onCameraReady={onCameraReady}>
         <View style={styles.cameraShutterButtonContainer}>
           <TouchableOpacity style={styles.cameraShutterButton} onPress={takePicture} />
         </View>
-      </Camera>
+      </CameraView>
 
       <View style={styles.buttons}>
         <Button title="Take picture" onPress={takePicture} />
         <Button
-          title={cameraType === CameraType.back ? 'Switch to front' : 'Switch to back'}
+          title={cameraType === 'back' ? 'Switch to front' : 'Switch to back'}
           onPress={reverse}
         />
       </View>
@@ -220,11 +223,6 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingTop: StatusBar.currentHeight,
   },
-  scrollContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-  },
   exampleContainer: {
     padding: 20,
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -252,13 +250,16 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: 'bold',
     textAlign: 'center',
+    ...Platform.select({
+      ios: { color: PlatformColor('labelColor') },
+    }),
   },
   videoExample: {
     justifyContent: 'center',
   },
   video: {
     alignSelf: 'center',
-    width: 400,
+    width: '100%',
     height: 200,
   },
   buttons: {

@@ -10,6 +10,76 @@
 
 ### 💡 Others
 
+- [apple] Migrate remaining `expo-module.config.json` to unified platform syntax. ([#34445](https://github.com/expo/expo/pull/34445) by [@reichhartd](https://github.com/reichhartd))
+
+## 7.1.2 — 2024-11-19
+
+### 🐛 Bug fixes
+
+- Fix `formatFullName` not specifying a return type. ([#33068](https://github.com/expo/expo/pull/33068) by [@alanjhughes](https://github.com/alanjhughes))
+
+## 7.1.1 — 2024-11-15
+
+_This version does not introduce any user-facing changes._
+
+## 7.1.0 — 2024-11-14
+
+### 🎉 New features
+
+- Add `formatFullName` method to format tokenized full name object into a local-aware string representation ([#32567](https://github.com/expo/expo/pull/32567) by [@Armster15](https://github.com/Armster15))
+
+## 7.0.1 — 2024-10-22
+
+_This version does not introduce any user-facing changes._
+
+## 7.0.0 — 2024-10-22
+
+### 🛠 Breaking changes
+
+- Bumped iOS deployment target to 15.1. ([#30840](https://github.com/expo/expo/pull/30840) by [@tsapeta](https://github.com/tsapeta))
+
+### 🐛 Bug fixes
+
+- Add missing `react-native` peer dependency. ([#30573](https://github.com/expo/expo/pull/30573) by [@byCedric](https://github.com/byCedric))
+
+### 💡 Others
+
+- Removed redundant usage of `EventEmitter` instance. ([#28946](https://github.com/expo/expo/pull/28946) by [@tsapeta](https://github.com/tsapeta))
+
+## 6.4.2 - 2024-07-22
+
+### 💡 Others
+
+- Handle new error code on `iOS` 18. ([#29639](https://github.com/expo/expo/pull/29639) by [@alanjhughes](https://github.com/alanjhughes))
+
+## 6.4.1 — 2024-04-23
+
+_This version does not introduce any user-facing changes._
+
+## 6.4.0 — 2024-04-18
+
+_This version does not introduce any user-facing changes._
+
+## 6.3.0 — 2023-11-14
+
+### 🛠 Breaking changes
+
+- Bumped iOS deployment target to 13.4. ([#25063](https://github.com/expo/expo/pull/25063) by [@gabrieldonadel](https://github.com/gabrieldonadel))
+
+## 6.2.0 — 2023-10-17
+
+### 💡 Others
+
+- Ship untranspiled JSX to support custom handling of `jsx` and `createElement`. ([#24889](https://github.com/expo/expo/pull/24889) by [@EvanBacon](https://github.com/EvanBacon))
+
+## 6.1.2 — 2023-09-04
+
+_This version does not introduce any user-facing changes._
+
+## 6.1.1 — 2023-08-02
+
+_This version does not introduce any user-facing changes._
+
 ## 6.1.0 — 2023-05-08
 
 _This version does not introduce any user-facing changes._

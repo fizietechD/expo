@@ -10,6 +10,116 @@
 
 ### 💡 Others
 
+- [Android] Started using expo modules gradle plugin. ([#34176](https://github.com/expo/expo/pull/34176) by [@lukmccall](https://github.com/lukmccall))
+
+## 0.15.4 — 2024-11-19
+
+_This version does not introduce any user-facing changes._
+
+## 0.15.3 — 2024-11-14
+
+_This version does not introduce any user-facing changes._
+
+## 0.15.2 — 2024-11-05
+
+_This version does not introduce any user-facing changes._
+
+## 0.15.1 — 2024-10-22
+
+_This version does not introduce any user-facing changes._
+
+## 0.15.0 — 2024-10-22
+
+### 🛠 Breaking changes
+
+- Bumped iOS and tvOS deployment target to 15.1. ([#30840](https://github.com/expo/expo/pull/30840) by [@tsapeta](https://github.com/tsapeta))
+
+### 🐛 Bug fixes
+
+- Only import from `expo/config` to follow proper dependency chains. ([#30501](https://github.com/expo/expo/pull/30501) by [@byCedric](https://github.com/byCedric))
+
+## 0.14.3 — 2024-05-16
+
+_This version does not introduce any user-facing changes._
+
+## 0.14.2 — 2024-05-06
+
+_This version does not introduce any user-facing changes._
+
+## 0.14.1 — 2024-04-29
+
+_This version does not introduce any user-facing changes._
+
+## 0.14.0 — 2024-04-18
+
+### 🛠 Breaking changes
+
+- Remove classic updates. ([#26036](https://github.com/expo/expo/pull/26036), [#26048](https://github.com/expo/expo/pull/26048) by [@wschurman](https://github.com/wschurman))
+
+### 💡 Others
+
+- [Android] Remove unsafe internal mutation capability. ([#26229](https://github.com/expo/expo/pull/26229) by [@wschurman](https://github.com/wschurman))
+- Rename manifest classes. ([#26234](https://github.com/expo/expo/pull/26234), [#26235](https://github.com/expo/expo/pull/26235), [#26257](https://github.com/expo/expo/pull/26257) by [@wschurman](https://github.com/wschurman))
+- Remove use of legacy sdkVersion runtimeVersion policy. ([#26957](https://github.com/expo/expo/pull/26957) by [@wschurman](https://github.com/wschurman))
+- Removed deprecated backward compatible Gradle settings. ([#28083](https://github.com/expo/expo/pull/28083) by [@kudo](https://github.com/kudo))
+
+## 0.13.2 - 2024-01-18
+
+_This version does not introduce any user-facing changes._
+
+## 0.13.1 - 2024-01-10
+
+_This version does not introduce any user-facing changes._
+
+## 0.13.0 — 2023-12-12
+
+_This version does not introduce any user-facing changes._
+
+## 0.12.0 — 2023-11-14
+
+### 🛠 Breaking changes
+
+- Bumped iOS deployment target to 13.4. ([#25063](https://github.com/expo/expo/pull/25063) by [@gabrieldonadel](https://github.com/gabrieldonadel))
+- On `Android` bump `compileSdkVersion` and `targetSdkVersion` to `34`. ([#24708](https://github.com/expo/expo/pull/24708) by [@alanjhughes](https://github.com/alanjhughes))
+
+## 0.11.0 — 2023-10-17
+
+_This version does not introduce any user-facing changes._
+
+## 0.10.0 — 2023-09-15
+
+### 🎉 New features
+
+- Added support for Apple tvOS. ([#24329](https://github.com/expo/expo/pull/24329) by [@douglowder](https://github.com/douglowder))
+
+## 0.9.0 — 2023-09-04
+
+### 🛠 Breaking changes
+
+- Remove classic manifest types. ([#24053](https://github.com/expo/expo/pull/24053) by [@wschurman](https://github.com/wschurman))
+- Dropped support for Android SDK 21 and 22. ([#24201](https://github.com/expo/expo/pull/24201) by [@behenate](https://github.com/behenate))
+
+### 🎉 New features
+
+- Added support for React Native 0.73. ([#24018](https://github.com/expo/expo/pull/24018) by [@kudo](https://github.com/kudo))
+- Make expo-manifests source of truth for manifest TS types. ([#24049](https://github.com/expo/expo/pull/24049) by [@wschurman](https://github.com/wschurman))
+
+## 0.8.1 — 2023-08-02
+
+### 🛠 Breaking changes
+
+- Drop support for `logUrl` which sent console logs to the legacy `expo-cli`. ([#18596](https://github.com/expo/expo/pull/18596) by [@EvanBacon](https://github.com/EvanBacon))
+
+## 0.8.0 — 2023-07-28
+
+### 🎉 New features
+
+- [iOS] Expose getMetadata method to match android. ([#23445](https://github.com/expo/expo/pull/23445) by [@wschurman](https://github.com/wschurman))
+
+### 🐛 Bug fixes
+
+- [iOS] Fix error in handling nested array. ([#23562](https://github.com/expo/expo/pull/23562) by [@douglowder](https://github.com/douglowder))
+
 ## 0.7.1 - 2023-06-30
 
 ### 🐛 Bug fixes

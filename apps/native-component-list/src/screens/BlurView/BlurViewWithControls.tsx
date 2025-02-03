@@ -1,16 +1,16 @@
-import { BlurTint, BlurView } from 'expo-blur';
+import { BlurTint, BlurView, ExperimentalBlurMethod } from 'expo-blur';
 import React, { useCallback, memo, useEffect } from 'react';
 import { View, StyleSheet, Text, Image } from 'react-native';
 import Animated, { useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 
-import useResettingState from '../../utilities/useResettingState';
 import Slider from './Slider';
+import useResettingState from '../../utilities/useResettingState';
 
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
-export default memo((props: { tint: BlurTint }) => {
-  const animatedIntensity = useSharedValue(0);
-  const manualIntensity = useSharedValue(0);
+export default memo((props: { tint: BlurTint; blurMethod: ExperimentalBlurMethod }) => {
+  const animatedIntensity = useSharedValue<number | undefined>(0);
+  const manualIntensity = useSharedValue<number | undefined>(0);
   const [manualIntensityIsActive, setManualIntensityIsActive] = useResettingState(false, 3000);
 
   const handleSliderChange = useCallback((value: number) => {
@@ -30,13 +30,14 @@ export default memo((props: { tint: BlurTint }) => {
         <AnimatedBlurView
           style={styles.blurView}
           tint={props.tint}
-          intensity={manualIntensityIsActive ? manualIntensity : animatedIntensity}>
+          intensity={manualIntensityIsActive ? manualIntensity : animatedIntensity}
+          experimentalBlurMethod={props.blurMethod}>
           <Text style={styles.nonBlurredText}>{props.tint}</Text>
           <Slider
             title="Manual intensity:"
             onChange={handleSliderChange}
             active={!!manualIntensityIsActive}
-            value={manualIntensity.value}
+            value={manualIntensity.value!}
             style={styles.slider}
           />
         </AnimatedBlurView>

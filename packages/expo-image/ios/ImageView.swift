@@ -2,7 +2,9 @@
 
 import SDWebImage
 import ExpoModulesCore
+#if !os(tvOS)
 import VisionKit
+#endif
 
 typealias SDWebImageContext = [SDWebImageContextOption: Any]
 
@@ -22,10 +24,21 @@ public final class ImageView: ExpoView {
 
   var loadingOptions: SDWebImageOptions = [
     .retryFailed, // Don't blacklist URLs that failed downloading
-    .handleCookies // Handle cookies stored in the shared `HTTPCookieStore`
+    .handleCookies, // Handle cookies stored in the shared `HTTPCookieStore`
+    // Images from cache are `AnimatedImage`s. BlurRadius is done via a SDImageBlurTransformer
+    // so this flag needs to be enabled. Beware most transformers cannot manage animated images.
+    .transformAnimatedImage
   ]
 
+  /**
+   An array of sources from which the view will asynchronously load one of them that fits best into the view bounds.
+   */
   var sources: [ImageSource]?
+
+  /**
+   An image that has been loaded from one of the `sources` or set by the shared ref to an image.
+   */
+  var sourceImage: UIImage?
 
   var pendingOperation: SDWebImageCombinedOperation?
 
@@ -37,9 +50,11 @@ public final class ImageView: ExpoView {
 
   var blurRadius: CGFloat = 0.0
 
-  var imageTintColor: UIColor = .clear
+  var imageTintColor: UIColor?
 
   var cachePolicy: ImageCachePolicy = .disk
+
+  var allowDownscaling: Bool = true
 
   var recyclingKey: String? {
     didSet {
@@ -48,6 +63,8 @@ public final class ImageView: ExpoView {
       }
     }
   }
+
+  var autoplay: Bool = true
 
   // MARK: - Events
 
@@ -59,12 +76,14 @@ public final class ImageView: ExpoView {
 
   let onLoad = EventDispatcher()
 
+  let onDisplay = EventDispatcher()
+
   // MARK: - View
 
   public override var bounds: CGRect {
     didSet {
-      // Reload the image when the bounds size has changed and the view is mounted.
-      if oldValue.size != bounds.size && window != nil {
+      // Reload the image when the bounds size has changed and is not empty.
+      if oldValue.size != bounds.size && bounds.size != .zero {
         reload()
       }
     }
@@ -110,40 +129,32 @@ public final class ImageView: ExpoView {
     if sdImageView.image == nil {
       sdImageView.contentMode = contentFit.toContentMode()
     }
-    var context = SDWebImageContext()
+    var context = createSDWebImageContext(forSource: source, cachePolicy: cachePolicy)
 
     // Cancel currently running load requests.
     cancelPendingOperation()
 
-    // Modify URL request to add headers.
-    if let headers = source.headers {
-      context[SDWebImageContextOption.downloadRequestModifier] = SDWebImageDownloaderRequestModifier(headers: headers)
-    }
-
-    context[.cacheKeyFilter] = createCacheKeyFilter(source.cacheKey)
     context[.imageTransformer] = createTransformPipeline()
 
-    // Assets from the bundler have `scale` prop which needs to be passed to the context,
-    // otherwise they would be saved in cache with scale = 1.0 which may result in
-    // incorrectly rendered images for resize modes that don't scale (`center` and `repeat`).
-    context[.imageScaleFactor] = source.scale
-
-    if source.isCachingAllowed {
-      let sdCacheType = cachePolicy.toSdCacheType().rawValue
-      context[.originalQueryCacheType] = sdCacheType
-      context[.originalStoreCacheType] = sdCacheType
-    } else {
-      context[.originalQueryCacheType] = SDImageCacheType.none.rawValue
-      context[.originalStoreCacheType] = SDImageCacheType.none.rawValue
+    // It seems that `UIImageView` can't tint some vector graphics. If the `tintColor` prop is specified,
+    // we tell the SVG coder to decode to a bitmap instead. This will become useless when we switch to SVGNative coder.
+    if imageTintColor != nil {
+      context[.imageDecodeOptions] = [
+        SDImageCoderOption.webImageContext: [
+          "svgPrefersBitmap": true,
+          "svgImageSize": sdImageView.bounds.size,
+          "svgImagePreserveAspectRatio": true
+        ]
+      ]
     }
-    // Set which cache can be used to query and store the downloaded image.
-    // We want to store only original images (without transformations).
-    context[.queryCacheType] = SDImageCacheType.none.rawValue
-    context[.storeCacheType] = SDImageCacheType.none.rawValue
 
-    // Some loaders (e.g. blurhash) need access to the source and the screen scale.
-    context[ImageView.contextSourceKey] = source
+    // Some loaders (e.g. PhotoLibraryAssetLoader) may need to know the screen scale.
     context[ImageView.screenScaleKey] = screenScale
+
+    // Do it here so we don't waste resources trying to fetch from a remote URL
+    if maybeRenderLocalAsset(from: source) {
+      return
+    }
 
     onLoadStart([:])
 
@@ -185,21 +196,29 @@ public final class ImageView: ExpoView {
     _ imageUrl: URL?
   ) {
     if let error = error {
-      onError(["error": error.localizedDescription])
+      let code = (error as NSError).code
+
+      // SDWebImage throws an error when loading operation is canceled (interrupted) by another load request.
+      // We do want to ignore that one and wait for the new request to load.
+      if code != SDWebImageError.cancelled.rawValue {
+        onError(["error": error.localizedDescription])
+      }
       return
     }
     guard finished else {
       log.debug("Loading the image has been canceled")
       return
     }
-    if let image = image {
+
+    if let image {
       onLoad([
         "cacheType": cacheTypeToString(cacheType),
         "source": [
           "url": imageUrl?.absoluteString,
           "width": image.size.width,
           "height": image.size.height,
-          "mediaType": imageFormatToMediaType(image.sd_imageFormat)
+          "mediaType": imageFormatToMediaType(image.sd_imageFormat),
+          "isAnimated": image.sd_isAnimated
         ]
       ])
 
@@ -211,15 +230,31 @@ public final class ImageView: ExpoView {
         contentFit: contentFit
       ).rounded(.up)
 
-      Task {
-        let image = await processImage(image, idealSize: idealSize, scale: scale)
-
-        applyContentPosition(contentSize: idealSize, containerSize: frame.size)
-        renderImage(image)
-      }
+      let image = processImage(image, idealSize: idealSize, scale: scale)
+      applyContentPosition(contentSize: idealSize, containerSize: frame.size)
+      renderSourceImage(image)
     } else {
       displayPlaceholderIfNecessary()
     }
+  }
+
+  private func maybeRenderLocalAsset(from source: ImageSource) -> Bool {
+    let path: String? = {
+      // .path() on iOS 16 would remove the leading slash, but it doesn't on tvOS 16 🙃
+      // It also crashes with EXC_BREAKPOINT when parsing data:image uris
+      // manually drop the leading slash below iOS 16
+      if let path = source.uri?.path {
+        return String(path.dropFirst())
+      }
+      return nil
+    }()
+
+    if let path, let local = UIImage(named: path) {
+      renderSourceImage(local)
+      return true
+    }
+
+    return false
   }
 
   // MARK: - Placeholder
@@ -253,6 +288,13 @@ public final class ImageView: ExpoView {
   }
 
   /**
+   A bool value whether the placeholder can be displayed, i.e. nothing has been displayed yet or the sources are unset.
+   */
+  var canDisplayPlaceholder: Bool {
+    return isViewEmpty || (!hasAnySource && sourceImage == nil)
+  }
+
+  /**
    Loads a placeholder from the best source provided in `placeholder` prop.
    A placeholder should be a local asset to have more time to show before the proper image is loaded,
    but remote assets are also supported – for the bundler and to cache them on the disk to load faster next time.
@@ -261,27 +303,20 @@ public final class ImageView: ExpoView {
   func loadPlaceholderIfNecessary() {
     // Exit early if placeholder is not set or there is already an image attached to the view.
     // The placeholder is only used until the first image is loaded.
-    guard let placeholder = bestPlaceholder, isViewEmpty || !hasAnySource else {
+    guard canDisplayPlaceholder, let placeholder = bestPlaceholder else {
       return
     }
-    var context = SDWebImageContext()
-    let isPlaceholderHash = placeholder.isBlurhash || placeholder.isThumbhash
-
-    context[.imageScaleFactor] = placeholder.scale
-    context[.cacheKeyFilter] = createCacheKeyFilter(placeholder.cacheKey)
 
     // Cache placeholders on the disk. Should we let the user choose whether
     // to cache them or apply the same policy as with the proper image?
     // Basically they are also cached in memory as the `placeholderImage` property,
     // so just `disk` policy sounds like a good idea.
-    context[.queryCacheType] = SDImageCacheType.disk.rawValue
-    context[.storeCacheType] = SDImageCacheType.disk.rawValue
+    var context = createSDWebImageContext(forSource: placeholder, cachePolicy: .disk)
 
-    // Some loaders (e.g. blurhash) need access to the source.
-    context[ImageView.contextSourceKey] = placeholder
+    let isPlaceholderHash = placeholder.isBlurhash || placeholder.isThumbhash
 
     imageManager.loadImage(with: placeholder.uri, context: context, progress: nil) { [weak self] placeholder, _, _, _, finished, _ in
-      guard let self = self, let placeholder = placeholder, finished else {
+      guard let self, let placeholder, finished else {
         return
       }
       self.placeholderImage = placeholder
@@ -294,29 +329,28 @@ public final class ImageView: ExpoView {
    Displays a placeholder if necessary – the placeholder can only be displayed when no image has been displayed yet or the sources are unset.
    */
   private func displayPlaceholderIfNecessary() {
-    guard isViewEmpty || !hasAnySource, let placeholder = placeholderImage else {
+    guard canDisplayPlaceholder, let placeholder = placeholderImage else {
       return
     }
-    setImage(placeholder, contentFit: placeholderContentFit)
+    setImage(placeholder, contentFit: placeholderContentFit, isPlaceholder: true)
   }
 
   // MARK: - Processing
 
   private func createTransformPipeline() -> SDImagePipelineTransformer {
     let transformers: [SDImageTransformer] = [
-      SDImageBlurTransformer(radius: blurRadius),
-      SDImageTintTransformer(color: imageTintColor)
+      SDImageBlurTransformer(radius: blurRadius)
     ]
     return SDImagePipelineTransformer(transformers: transformers)
   }
 
-  private func processImage(_ image: UIImage?, idealSize: CGSize, scale: Double) async -> UIImage? {
+  private func processImage(_ image: UIImage?, idealSize: CGSize, scale: Double) -> UIImage? {
     guard let image = image, !bounds.isEmpty else {
       return nil
     }
     // Downscale the image only when necessary
-    if shouldDownscale(image: image, toSize: idealSize, scale: scale) {
-      return await resize(animatedImage: image, toSize: idealSize, scale: scale)
+    if allowDownscaling && shouldDownscale(image: image, toSize: idealSize, scale: scale) {
+      return resize(animatedImage: image, toSize: idealSize, scale: scale)
     }
     return image
   }
@@ -331,28 +365,50 @@ public final class ImageView: ExpoView {
     sdImageView.layer.frame.origin = offset
   }
 
-  private func renderImage(_ image: UIImage?) {
+  internal func renderSourceImage(_ image: UIImage?) {
+    // Update the source image before it gets rendered or transitioned to.
+    sourceImage = image
+
     if let transition = transition, transition.duration > 0 {
       let options = transition.toAnimationOptions()
       let seconds = transition.duration / 1000
 
       UIView.transition(with: sdImageView, duration: seconds, options: options) { [weak self] in
-        if let self = self {
-          self.setImage(image, contentFit: self.contentFit)
+        if let self {
+          self.setImage(image, contentFit: self.contentFit, isPlaceholder: false)
         }
       }
     } else {
-      setImage(image, contentFit: contentFit)
+      setImage(image, contentFit: contentFit, isPlaceholder: false)
     }
   }
 
-  private func setImage(_ image: UIImage?, contentFit: ContentFit) {
+  private func setImage(_ image: UIImage?, contentFit: ContentFit, isPlaceholder: Bool) {
     sdImageView.contentMode = contentFit.toContentMode()
-    sdImageView.image = image
 
+    if isPlaceholder {
+      sdImageView.autoPlayAnimatedImage = true
+    } else {
+      sdImageView.autoPlayAnimatedImage = autoplay
+    }
+
+    if let imageTintColor, !isPlaceholder {
+      sdImageView.tintColor = imageTintColor
+      sdImageView.image = image?.withRenderingMode(.alwaysTemplate)
+    } else {
+      sdImageView.tintColor = nil
+      sdImageView.image = image
+    }
+
+    if !isPlaceholder {
+      onDisplay()
+    }
+
+#if !os(tvOS)
     if enableLiveTextInteraction {
       analyzeImage()
     }
+#endif
   }
 
   // MARK: - Helpers
@@ -392,13 +448,13 @@ public final class ImageView: ExpoView {
   }
 
   // MARK: - Live Text Interaction
-
-  @available(iOS 16.0, *)
+#if !os(tvOS)
+  @available(iOS 16.0, macCatalyst 17.0, *)
   static let imageAnalyzer = ImageAnalyzer.isSupported ? ImageAnalyzer() : nil
 
   var enableLiveTextInteraction: Bool = false {
     didSet {
-      guard #available(iOS 16.0, *), oldValue != enableLiveTextInteraction, ImageAnalyzer.isSupported else {
+      guard #available(iOS 16.0, macCatalyst 17.0, *), oldValue != enableLiveTextInteraction, ImageAnalyzer.isSupported else {
         return
       }
       if enableLiveTextInteraction {
@@ -411,7 +467,7 @@ public final class ImageView: ExpoView {
   }
 
   private func analyzeImage() {
-    guard #available(iOS 16.0, *), ImageAnalyzer.isSupported, let image = sdImageView.image else {
+    guard #available(iOS 16.0, macCatalyst 17.0, *), ImageAnalyzer.isSupported, let image = sdImageView.image else {
       return
     }
 
@@ -435,11 +491,12 @@ public final class ImageView: ExpoView {
     }
   }
 
-  @available(iOS 16.0, *)
+  @available(iOS 16.0, macCatalyst 17.0, *)
   private func findImageAnalysisInteraction() -> ImageAnalysisInteraction? {
     let interaction = sdImageView.interactions.first {
       return $0 is ImageAnalysisInteraction
     }
     return interaction as? ImageAnalysisInteraction
   }
+#endif
 }

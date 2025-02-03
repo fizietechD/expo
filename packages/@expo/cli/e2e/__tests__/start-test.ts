@@ -1,28 +1,15 @@
 /* eslint-env jest */
-import {
-  isMultipartPartWithName,
-  parseMultipartMixedResponseAsync,
-} from '@expo/multipart-body-parser';
-import execa from 'execa';
-import fs from 'fs-extra';
-import fetch from 'node-fetch';
-import nullthrows from 'nullthrows';
+import fs from 'fs';
 import path from 'path';
 
-import {
-  execute,
-  projectRoot,
-  getLoadedModulesAsync,
-  setupTestProjectAsync,
-  bin,
-  ensurePortFreeAsync,
-} from './utils';
+import { projectRoot, getLoadedModulesAsync, setupTestProjectWithOptionsAsync } from './utils';
+import { createExpoStart, executeExpoAsync } from '../utils/expo';
 
 const originalForceColor = process.env.FORCE_COLOR;
 const originalCI = process.env.CI;
 
 beforeAll(async () => {
-  await fs.mkdir(projectRoot, { recursive: true });
+  await fs.promises.mkdir(projectRoot, { recursive: true });
   process.env.FORCE_COLOR = '0';
   process.env.CI = '1';
 });
@@ -35,12 +22,6 @@ afterAll(() => {
 it('loads expected modules by default', async () => {
   const modules = await getLoadedModulesAsync(`require('../../build/src/start').expoStart`);
   expect(modules).toStrictEqual([
-    '../node_modules/ansi-styles/index.js',
-    '../node_modules/arg/index.js',
-    '../node_modules/chalk/source/index.js',
-    '../node_modules/chalk/source/util.js',
-    '../node_modules/has-flag/index.js',
-    '../node_modules/supports-color/index.js',
     '@expo/cli/build/src/log.js',
     '@expo/cli/build/src/start/index.js',
     '@expo/cli/build/src/utils/args.js',
@@ -49,7 +30,7 @@ it('loads expected modules by default', async () => {
 });
 
 it('runs `npx expo start --help`', async () => {
-  const results = await execute('start', '--help');
+  const results = await executeExpoAsync(projectRoot, ['start', '--help']);
   expect(results.stdout).toMatchInlineSnapshot(`
     "
       Info
@@ -85,7 +66,6 @@ it('runs `npx expo start --help`', async () => {
         --scheme <scheme>               Custom URI protocol to use when launching an app
         -p, --port <number>             Port to start the dev server on (does not apply to web or tunnel). Default: 8081
         
-        --force-manifest-type <string>  Override auto detection of manifest type. Options: expo-updates, classic
         --private-key-path <path>       Path to private key for code signing. Default: "private-key.pem" in the same directory as the certificate specified by the expo-updates configuration in app.json.
         -h, --help                      Usage info
     "
@@ -99,108 +79,119 @@ for (const args of [
   ['-m', 'localhost', '--lan', '--offline'],
 ]) {
   it(`asserts invalid URL arguments on \`expo start ${args.join(' ')}\``, async () => {
-    await expect(execa('node', [bin, 'start', ...args], { cwd: projectRoot })).rejects.toThrowError(
-      /Specify at most one of/
-    );
+    await expect(
+      executeExpoAsync(projectRoot, ['start', ...args], { verbose: false })
+    ).rejects.toThrow(/Specify at most one of/);
   });
 }
 
 describe('server', () => {
-  // Kill port
-  const kill = () => ensurePortFreeAsync(8081);
+  const expo = createExpoStart({
+    env: {
+      EXPO_USE_FAST_RESOLVER: 'true',
+    },
+  });
 
   beforeEach(async () => {
-    await kill();
+    expo.options.cwd = await setupTestProjectWithOptionsAsync('basic-start', 'with-blank');
+    await fs.promises.rm(path.join(projectRoot, '.expo'), { force: true, recursive: true });
+    await expo.startAsync();
   });
-
   afterAll(async () => {
-    await kill();
+    await expo.stopAsync();
   });
-  it(
-    'runs `npx expo start`',
-    async () => {
-      const projectRoot = await setupTestProjectAsync('basic-start', 'with-blank');
-      await fs.remove(path.join(projectRoot, '.expo'));
 
-      const promise = execa('node', [bin, 'start'], { cwd: projectRoot });
+  it('runs `npx expo start`', async () => {
+    const manifest = await expo.fetchExpoGoManifestAsync();
 
-      console.log('Starting server');
+    // Required for Expo Go
+    expect(manifest.extra.expoGo?.packagerOpts).toStrictEqual({
+      dev: true,
+    });
+    expect(manifest.extra.expoGo?.developer).toStrictEqual({
+      projectRoot: expect.anything(),
+      tool: 'expo-cli',
+    });
 
-      await new Promise<void>((resolve, reject) => {
-        promise.on('close', (code: number) => {
-          reject(
-            code === 0
-              ? 'Server closed too early. Run `kill -9 $(lsof -ti:8081)` to kill the orphaned process.'
-              : code
-          );
-        });
+    // URLs
+    expect(manifest.launchAsset.url).toBe(
+      new URL(
+        '/node_modules/expo/AppEntry.bundle?platform=ios&dev=true&hot=false&transform.engine=hermes&transform.bytecode=1&transform.routerRoot=app&unstable_transformProfile=hermes-stable',
+        expo.url
+      ).href
+    );
+    expect(manifest.extra.expoGo?.debuggerHost).toBe(expo.url.host);
+    expect(manifest.extra.expoGo?.mainModuleName).toMatchPath('node_modules/expo/AppEntry');
+    expect(manifest.extra.expoClient?.hostUri).toBe(expo.url.host);
 
-        promise.stdout?.on('data', (data) => {
-          const stdout = data.toString();
-          console.log('output:', stdout);
-          if (stdout.includes('Logs for your project')) {
-            resolve();
-          }
-        });
-      });
+    // Manifest
+    expect(manifest.runtimeVersion).toBe('1.0');
+    expect(manifest.extra.expoClient?.sdkVersion).toBe('52.0.0');
+    expect(manifest.extra.expoClient?.slug).toBe('basic-start');
+    expect(manifest.extra.expoClient?.name).toBe('basic-start');
 
-      console.log('Fetching manifest');
-      const response = await fetch('http://localhost:8081/', {
-        headers: {
-          'expo-platform': 'ios',
-          Accept: 'multipart/mixed',
-        },
-      });
+    // Custom
+    expect(manifest.extra.expoGo?.__flipperHack).toBe('React Native packager is running');
 
-      const multipartParts = await parseMultipartMixedResponseAsync(
-        response.headers.get('content-type') as string,
-        await response.buffer()
-      );
-      const manifestPart = nullthrows(
-        multipartParts.find((part) => isMultipartPartWithName(part, 'manifest'))
-      );
+    const bundleResponse = await expo.fetchBundleAsync(manifest.launchAsset.url);
+    const bundleContent = await bundleResponse.text();
+    expect(bundleContent.length).toBeGreaterThan(1000);
 
-      const manifest = JSON.parse(manifestPart.body);
+    // Get source maps for the bundle
+    // Find source map URL
+    const sourceMapUrl = bundleContent.match(/\/\/# sourceMappingURL=(.*)/)?.[1];
+    expect(sourceMapUrl).toBeTruthy();
 
-      // Required for Expo Go
-      expect(manifest.extra.expoGo.packagerOpts).toStrictEqual({
-        dev: true,
-      });
-      expect(manifest.extra.expoGo.developer).toStrictEqual({
-        projectRoot: expect.anything(),
-        tool: 'expo-cli',
-      });
+    const sourceMaps = await expo.fetchBundleAsync(sourceMapUrl!).then((res) => res.json());
+    expect(sourceMaps).toMatchObject({
+      version: 3,
+      sources: expect.arrayContaining([
+        '__prelude__',
+        expect.pathMatching(/metro-runtime\/src\/polyfills\/require\.js$/),
+        expect.pathMatching(/@react-native\/js-polyfills\/console\.js$/),
+        expect.pathMatching(/@react-native\/js-polyfills\/error-guard\.js$/),
+        '\0polyfill:external-require',
+        // Ensure that the custom module from the serializer is included in dev, otherwise the sources will be thrown off.
+        '\0polyfill:environment-variables',
+      ]),
+      mappings: expect.any(String),
+    });
+  });
+});
 
-      // URLs
-      expect(manifest.launchAsset.url).toBe(
-        'http://127.0.0.1:8081/node_modules/expo/AppEntry.bundle?platform=ios&dev=true&hot=false&lazy=true'
-      );
-      expect(manifest.extra.expoGo.debuggerHost).toBe('127.0.0.1:8081');
-      expect(manifest.extra.expoGo.logUrl).toBe('http://127.0.0.1:8081/logs');
-      expect(manifest.extra.expoGo.mainModuleName).toBe('node_modules/expo/AppEntry');
-      expect(manifest.extra.expoClient.hostUri).toBe('127.0.0.1:8081');
-
-      // Manifest
-      expect(manifest.runtimeVersion).toBe('exposdk:47.0.0');
-      expect(manifest.extra.expoClient.sdkVersion).toBe('47.0.0');
-      expect(manifest.extra.expoClient.slug).toBe('basic-start');
-      expect(manifest.extra.expoClient.name).toBe('basic-start');
-
-      // Custom
-      expect(manifest.extra.expoGo.__flipperHack).toBe('React Native packager is running');
-
-      console.log('Fetching bundle');
-      const bundle = await fetch(manifest.launchAsset.url).then((res) => res.text());
-      console.log('Fetched bundle: ', bundle.length);
-      expect(bundle.length).toBeGreaterThan(1000);
-      console.log('Finished');
-
-      // Kill process.
-      promise.kill('SIGTERM');
-
-      await promise;
+describe('start - dev clients', () => {
+  const expo = createExpoStart({
+    env: {
+      EXPO_USE_FAST_RESOLVER: 'true',
     },
-    // Could take 45s depending on how fast npm installs
-    120 * 1000
-  );
+  });
+
+  beforeAll(async () => {
+    const projectRoot = await setupTestProjectWithOptionsAsync('start-dev-clients', 'with-blank');
+    expo.options.cwd = projectRoot;
+
+    // Add a `.env` file with `TEST_SCHEME`
+    await fs.promises.writeFile(path.join(projectRoot, '.env'), `TEST_SCHEME=some-value`);
+    // Add a `app.config.js` that asserts an env var from .env
+    await fs.promises.writeFile(
+      path.join(projectRoot, 'app.config.js'),
+      `const assert = require('node:assert');
+      const { env } = require('node:process');
+  
+      module.exports = ({ config }) => {
+        assert(env.TEST_SCHEME, 'TEST_SCHEME is not defined');
+        return { ...config, scheme: env.TEST_ENV };
+      };`
+    );
+
+    await expo.startAsync(['--dev-client']);
+  });
+  afterAll(async () => {
+    await expo.stopAsync();
+  });
+
+  it('runs `npx expo start` in dev client mode, using environment variable from .env', async () => {
+    const response = await expo.fetchBundleAsync('/');
+    expect(response.ok).toBeTruthy();
+  });
 });

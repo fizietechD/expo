@@ -1,6 +1,5 @@
 //  Copyright © 2019 650 Industries. All rights reserved.
 
-// swiftlint:disable closure_body_length
 // swiftlint:disable function_parameter_count
 
 import Foundation
@@ -8,26 +7,25 @@ import Foundation
 /**
  * Subclass of AppLoader which handles downloading updates from a remote server.
  */
-internal final class RemoteAppLoader: AppLoader {
-  private static let ErrorDomain = "EXUpdatesRemoteAppLoader"
-
+public final class RemoteAppLoader: AppLoader {
   private let downloader: FileDownloader
   private var remoteUpdateResponse: UpdateResponse?
   private let completionQueue: DispatchQueue
 
-  required init(
+  public required override init(
     config: UpdatesConfig,
+    logger: UpdatesLogger,
     database: UpdatesDatabase,
     directory: URL,
     launchedUpdate: Update?,
     completionQueue: DispatchQueue
   ) {
-    self.downloader = FileDownloader(config: config)
+    self.downloader = FileDownloader(config: config, logger: logger)
     self.completionQueue = completionQueue
-    super.init(config: config, database: database, directory: directory, launchedUpdate: launchedUpdate, completionQueue: completionQueue)
+    super.init(config: config, logger: logger, database: database, directory: directory, launchedUpdate: launchedUpdate, completionQueue: completionQueue)
   }
 
-  override func loadUpdate(
+  override public func loadUpdate(
     fromURL url: URL,
     onUpdateResponse updateResponseBlockArg: @escaping AppLoaderUpdateResponseBlock,
     asset assetBlockArg: @escaping AppLoaderAssetBlock,
@@ -49,12 +47,12 @@ internal final class RemoteAppLoader: AppLoader {
         let responseHeaderData = remoteUpdateResponse.responseHeaderData {
         strongSelf.database.databaseQueue.async {
           do {
-            // swiftlint:disable:next force_unwrapping
-            try strongSelf.database.setMetadata(withResponseHeaderData: responseHeaderData, scopeKey: strongSelf.config.scopeKey!)
+            try strongSelf.database.setMetadata(withResponseHeaderData: responseHeaderData, scopeKey: strongSelf.config.scopeKey)
             successBlockArg(updateResponse)
           } catch {
-            NSLog("Error persisting header data to disk: %@", error.localizedDescription)
-            errorBlockArg(error)
+            let cause = UpdatesError.remoteAppLoaderHeaderDataError(cause: error)
+            strongSelf.logger.error(cause: cause, code: UpdatesErrorCode.unknown)
+            errorBlockArg(cause)
           }
         }
       } else {
@@ -67,6 +65,7 @@ internal final class RemoteAppLoader: AppLoader {
       let extraHeaders = FileDownloader.extraHeadersForRemoteUpdateRequest(
         withDatabase: self.database,
         config: self.config,
+        logger: self.logger,
         launchedUpdate: self.launchedUpdate,
         embeddedUpdate: embeddedUpdate
       )
@@ -85,7 +84,7 @@ internal final class RemoteAppLoader: AppLoader {
     }
   }
 
-  override func downloadAsset(_ asset: UpdateAsset) {
+  override public func downloadAsset(_ asset: UpdateAsset) {
     let urlOnDisk = self.directory.appendingPathComponent(asset.filename)
 
     FileDownloader.assetFilesQueue.async {
@@ -97,19 +96,13 @@ internal final class RemoteAppLoader: AppLoader {
       } else {
         guard let assetUrl = asset.url else {
           self.handleAssetDownload(
-            withError: NSError(
-              domain: RemoteAppLoader.ErrorDomain,
-              code: 1006,
-              userInfo: [
-                NSLocalizedDescriptionKey: "Failed to download asset with no URL provided"
-              ]
-            ),
+            withError: UpdatesError.remoteAppLoaderAssetMissingUrl,
             asset: asset
           )
           return
         }
 
-        self.downloader.downloadFile(
+        self.downloader.downloadAsset(
           fromURL: assetUrl,
           verifyingHash: asset.expectedHash,
           toPath: urlOnDisk.path,
@@ -129,20 +122,22 @@ internal final class RemoteAppLoader: AppLoader {
 
   static func processSuccessLoaderResult(
     config: UpdatesConfig,
+    logger: UpdatesLogger,
     database: UpdatesDatabase,
     selectionPolicy: SelectionPolicy,
     launchedUpdate: Update?,
     directory: URL,
     loaderTaskQueue: DispatchQueue,
     updateResponse: UpdateResponse?,
-    priorError: Error?,
-    onComplete: @escaping (_ updateToLaunch: Update?, _ error: Error?, _ didRollBackToEmbedded: Bool) -> Void
+    priorError: UpdatesError?,
+    onComplete: @escaping (_ updateToLaunch: Update?, _ error: UpdatesError?, _ didRollBackToEmbedded: Bool) -> Void
   ) {
     let updateBeingLaunched = updateResponse?.manifestUpdateResponsePart?.updateManifest
 
     if let rollBackDirective = updateResponse?.directiveUpdateResponsePart?.updateDirective as? RollBackToEmbeddedUpdateDirective {
       self.processRollBackToEmbeddedDirective(
         config: config,
+        logger: logger,
         database: database,
         selectionPolicy: selectionPolicy,
         launchedUpdate: launchedUpdate,
@@ -167,6 +162,7 @@ internal final class RemoteAppLoader: AppLoader {
    */
   private static func processRollBackToEmbeddedDirective(
     config: UpdatesConfig,
+    logger: UpdatesLogger,
     database: UpdatesDatabase,
     selectionPolicy: SelectionPolicy,
     launchedUpdate: Update?,
@@ -174,8 +170,8 @@ internal final class RemoteAppLoader: AppLoader {
     loaderTaskQueue: DispatchQueue,
     rollBackDirective: RollBackToEmbeddedUpdateDirective,
     manifestFilters: [String: Any]?,
-    priorError: Error?,
-    onComplete: @escaping (_ updateToLaunch: Update?, _ error: Error?, _ didRollBackToEmbedded: Bool) -> Void
+    priorError: UpdatesError?,
+    onComplete: @escaping (_ updateToLaunch: Update?, _ error: UpdatesError?, _ didRollBackToEmbedded: Bool) -> Void
   ) {
     if !config.hasEmbeddedUpdate {
       onComplete(nil, priorError, false)
@@ -202,6 +198,7 @@ internal final class RemoteAppLoader: AppLoader {
 
     EmbeddedAppLoader(
       config: config,
+      logger: logger,
       database: database,
       directory: directory,
       launchedUpdate: nil,
@@ -221,7 +218,7 @@ internal final class RemoteAppLoader: AppLoader {
           }
           onComplete(update, priorError, true)
         } catch {
-          onComplete(nil, error, false)
+          onComplete(nil, UpdatesError.remoteAppLoaderUnknownError(cause: error), false)
         }
       }, error: { embeddedLoaderError in
         onComplete(nil, embeddedLoaderError, false)

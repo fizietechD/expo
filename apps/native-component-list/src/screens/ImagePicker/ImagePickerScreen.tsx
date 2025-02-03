@@ -2,11 +2,11 @@ import * as ImagePicker from 'expo-image-picker';
 import React from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 
+import ImagePickerAssetsList from './ImagePickerAssetsList';
 import FunctionDemo, {
   FunctionDescription,
   FunctionParameter,
 } from '../../components/FunctionDemo';
-import ImagePickerAssetsList from './ImagePickerAssetsList';
 
 const LAUNCH_PICKER_PARAMETERS: FunctionParameter[] = [
   {
@@ -17,9 +17,13 @@ const LAUNCH_PICKER_PARAMETERS: FunctionParameter[] = [
         name: 'mediaTypes',
         type: 'enum',
         values: [
-          { name: 'MediaTypeOptions.Images', value: ImagePicker.MediaTypeOptions.Images },
-          { name: 'MediaTypeOptions.Videos', value: ImagePicker.MediaTypeOptions.Videos },
-          { name: 'MediaTypeOptions.All', value: ImagePicker.MediaTypeOptions.All },
+          { name: "['images']", value: 'images' },
+          { name: "['videos']", value: 'videos' },
+          { name: "['livePhotos']", value: 'livePhotos' },
+          { name: "['images', 'videos']", value: ['images', 'videos'] },
+          { name: "['images', 'livePhotos']", value: ['images', 'livePhotos'] },
+          { name: "['livePhotos', 'videos']", value: ['livePhotos', 'videos'] },
+          { name: "['images', 'videos', 'livePhotos']", value: ['images', 'videos', 'livePhotos'] },
         ],
       },
       { name: 'allowsEditing', type: 'boolean', initial: false },
@@ -36,6 +40,7 @@ const LAUNCH_PICKER_PARAMETERS: FunctionParameter[] = [
       { name: 'quality', type: 'number', values: [0, 0.2, 0.7, 1.0] },
       { name: 'exif', type: 'boolean', initial: false },
       { name: 'base64', type: 'boolean', initial: false },
+      { name: 'legacy', type: 'boolean', initial: false },
       {
         name: 'videoExportPreset',
         type: 'enum',
@@ -133,7 +138,15 @@ const LAUNCH_PICKER_PARAMETERS: FunctionParameter[] = [
         name: 'orderedSelection',
         type: 'boolean',
         initial: false,
-        platforms: ['ios'],
+        platforms: ['ios', 'android'],
+      },
+      {
+        name: 'defaultTab',
+        type: 'enum',
+        values: [
+          { name: 'photos', value: 'photos' },
+          { name: 'albums', value: 'albums' },
+        ],
       },
       { name: 'videoMaxDuration', type: 'number', values: [0, 10, 60] },
       {

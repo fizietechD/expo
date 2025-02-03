@@ -1,0 +1,17 @@
+{
+  "extends": "expo-module-scripts/tsconfig.base",
+  "compilerOptions": {
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "noEmit": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitAny": true,
+    "paths": {
+      "react-native": ["../../node_modules/react-native"]
+    }
+  },
+  "include": ["App.tsx", "src/**/*", "ts-declarations"],
+  "exclude": ["**/__mocks__/*"]
+}

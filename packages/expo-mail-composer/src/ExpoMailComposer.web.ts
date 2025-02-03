@@ -1,6 +1,9 @@
-import qs from 'query-string';
-
-import { MailComposerOptions, MailComposerResult, MailComposerStatus } from './MailComposer.types';
+import {
+  MailClient,
+  MailComposerOptions,
+  MailComposerResult,
+  MailComposerStatus,
+} from './MailComposer.types';
 
 function removeNullishValues(obj) {
   for (const propName in obj) {
@@ -21,27 +24,31 @@ function checkValue(value?: string[] | string): string | null {
 }
 
 export default {
-  get name(): string {
-    return 'ExpoMailComposer';
+  getClients(): MailClient[] {
+    return [];
   },
   async composeAsync(options: MailComposerOptions): Promise<MailComposerResult> {
+    if (typeof window === 'undefined') {
+      return { status: MailComposerStatus.CANCELLED };
+    }
+    const mailtoUrl = new URL('mailto:' + (checkValue(options.recipients) || ''));
+
     const email = removeNullishValues({
-      cc: checkValue(options.ccRecipients),
-      bcc: checkValue(options.bccRecipients),
+      cc: options.ccRecipients,
+      bcc: options.bccRecipients,
       subject: options.subject,
       body: options.body,
+    }) as Record<string, string>;
+
+    Object.entries(email).forEach(([key, value]) => {
+      mailtoUrl.searchParams.append(key, value);
     });
 
-    const query = qs.stringify(email);
-    const queryComponent = query ? '?' + query : '';
-    const to = checkValue(options.recipients) || '';
-    const mailto = `mailto:${to}${queryComponent}`;
-
-    window.open(mailto);
+    window.open(mailtoUrl.toString());
 
     return { status: MailComposerStatus.UNDETERMINED };
   },
   async isAvailableAsync(): Promise<boolean> {
-    return true;
+    return typeof window !== 'undefined';
   },
 };

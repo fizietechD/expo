@@ -10,6 +10,16 @@ internal class DatabaseException: Exception {
   }
 }
 
+internal class DatabaseInvalidPathException: GenericException<String> {
+  override var code: String {
+    "E_SQLITE_INVALID_PATH"
+  }
+
+  override var reason: String {
+    "Invalid database path: \(param)"
+  }
+}
+
 internal class DeleteDatabaseException: GenericException<String> {
   override var code: String {
     "E_SQLITE_DELETE_DATABASE"
@@ -46,8 +56,46 @@ internal class InvalidSqlException: Exception {
   }
 }
 
-internal class InvalidArgumentsException: Exception {
+internal final class InvalidArgumentsException: GenericException<String> {
   override var reason: String {
-    "args must be an array"
+    "Invalid arguments: \(param)"
+  }
+}
+
+internal class InvalidBindParameterException: Exception {
+  override var reason: String {
+    "Invalid bind parameter"
+  }
+}
+
+internal class AccessClosedResourceException: Exception {
+  override var reason: String {
+    "Access to closed resource"
+  }
+}
+
+internal class SQLiteErrorException: GenericException<String> {
+  override var code: String {
+    "ERR_INTERNAL_SQLITE_ERROR"
+  }
+
+  override var reason: String {
+    "\(param)"
+  }
+}
+
+internal class InvalidConvertibleException: GenericException<String> {
+}
+
+internal final class UnsupportedOperationException: GenericException<String?> {
+  convenience init() {
+    self.init(nil)
+  }
+
+  override var reason: String {
+    if let param = param {
+      return "Unsupported operations: \(param)"
+    }
+    return "Unsupported operations"
   }
 }

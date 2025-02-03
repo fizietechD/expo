@@ -1,6 +1,6 @@
-import { getFaviconFromExpoConfigAsync } from '../../../export/favicon';
 import { ExpoMiddleware } from './ExpoMiddleware';
 import { ServerNext, ServerRequest, ServerResponse } from './server.types';
+import { getFaviconFromExpoConfigAsync } from '../../../export/favicon';
 
 const debug = require('debug')('expo:start:server:middleware:favicon') as typeof console.log;
 
@@ -26,7 +26,7 @@ export class FaviconMiddleware extends ExpoMiddleware {
 
     let faviconImageData: Buffer | null;
     try {
-      const data = await getFaviconFromExpoConfigAsync(this.projectRoot);
+      const data = await getFaviconFromExpoConfigAsync(this.projectRoot, { force: true });
       if (!data) {
         debug('No favicon defined in the Expo Config, skipping generation.');
         return next();

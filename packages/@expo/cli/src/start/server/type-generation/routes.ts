@@ -1,8 +1,10 @@
 import fs from 'fs/promises';
-import { debounce } from 'lodash';
+import debounce from 'lodash.debounce';
 import { Server } from 'metro';
 import path from 'path';
+import resolveFrom from 'resolve-from';
 
+import { directoryExistsAsync } from '../../../utils/dir';
 import { unsafeTemplate } from '../../../utils/template';
 import { ServerLike } from '../BundlerDevServer';
 import { metroWatchTypeScriptFiles } from '../metro/metroWatchTypeScriptFiles';
@@ -14,39 +16,105 @@ export const CATCH_ALL = /\[\.\.\..+?\]/g;
 // /[param1] - Match [param1]
 export const SLUG = /\[.+?\]/g;
 // /(group1,group2,group3)/test - match (group1,group2,group3)
-export const ARRAY_GROUP_REGEX = /\(\w+?,.*?\)/g;
+export const ARRAY_GROUP_REGEX = /\(\s*\w[\w\s]*?,.*?\)/g;
 // /(group1,group2,group3)/test - captures ["group1", "group2", "group3"]
-export const CAPTURE_GROUP_REGEX = /[\\(,](\w+?)(?=[,\\)])/g;
+export const CAPTURE_GROUP_REGEX = /[\\(,]\s*(\w[\w\s]*?)\s*(?=[,\\)])/g;
+/**
+ * Match:
+ *  - _layout files, +html, +not-found, string+api, etc
+ *  - Routes can still use `+`, but it cannot be in the last segment.
+ */
+export const TYPED_ROUTES_EXCLUSION_REGEX = /(_layout|[^/]*?\+[^/]*?)\.[tj]sx?$/;
 
 export interface SetupTypedRoutesOptions {
-  server: ServerLike;
+  server?: ServerLike;
   metro?: Server | null;
   typesDirectory: string;
   projectRoot: string;
+  /** Absolute expo router routes directory. */
   routerDirectory: string;
+  plugin?: Record<string, any>;
 }
 
-export async function setupTypedRoutes({
+export async function setupTypedRoutes(options: SetupTypedRoutesOptions) {
+  /*
+   * In SDK 51, TypedRoutes was moved out of cli and into expo-router. For now we need to support both
+   * the legacy and new versions of TypedRoutes.
+   *
+   * TODO (@marklawlor): Remove this check in SDK 53, only support Expo Router v4 and above.
+   */
+  const typedRoutesModule = resolveFrom.silent(
+    options.projectRoot,
+    'expo-router/build/typed-routes'
+  );
+  return typedRoutesModule ? typedRoutes(typedRoutesModule, options) : legacyTypedRoutes(options);
+}
+
+async function typedRoutes(
+  typedRoutesModulePath: any,
+  { server, metro, typesDirectory, projectRoot, routerDirectory, plugin }: SetupTypedRoutesOptions
+) {
+  /*
+   * Expo Router uses EXPO_ROUTER_APP_ROOT in multiple places to determine the root of the project.
+   * In apps compiled by Metro, this code is compiled away. But Typed Routes run in NodeJS with no compilation
+   * so we need to explicitly set it.
+   */
+  process.env.EXPO_ROUTER_APP_ROOT = routerDirectory;
+
+  const typedRoutesModule = require(typedRoutesModulePath);
+
+  /*
+   * Typed Routes can be run with out Metro or a Server, e.g. `expo customize tsconfig.json`
+   */
+  if (metro && server) {
+    // Setup out watcher first
+    metroWatchTypeScriptFiles({
+      projectRoot,
+      server,
+      metro,
+      eventTypes: ['add', 'delete', 'change'],
+      callback: typedRoutesModule.getWatchHandler(typesDirectory),
+    });
+  }
+
+  /*
+   * In SDK 52, the `regenerateDeclarations` was changed to accept plugin options.
+   * This function has an optional parameter that we cannot override, so we need to ensure the user
+   * is using a compatible version of `expo-router`. Otherwise, we will fallback to the old method.
+   *
+   * TODO(@marklawlor): In SDK53+ we should remove this check and always use the new method.
+   */
+  if ('version' in typedRoutesModule && typedRoutesModule.version >= 52) {
+    typedRoutesModule.regenerateDeclarations(typesDirectory, plugin);
+  } else {
+    typedRoutesModule.regenerateDeclarations(typesDirectory);
+  }
+}
+
+async function legacyTypedRoutes({
   server,
   metro,
   typesDirectory,
   projectRoot,
   routerDirectory,
 }: SetupTypedRoutesOptions) {
-  const appRoot = path.join(projectRoot, routerDirectory);
+  const { filePathToRoute, staticRoutes, dynamicRoutes, addFilePath, isRouteFile } =
+    getTypedRoutesUtils(routerDirectory);
 
-  const { filePathToRoute, staticRoutes, dynamicRoutes, addFilePath } =
-    getTypedRoutesUtils(appRoot);
-
-  if (metro) {
-    // Setup out watcher first
+  // Typed Routes can be run with out Metro or a Server, e.g. `expo customize tsconfig.json`
+  if (metro && server) {
     metroWatchTypeScriptFiles({
-      projectRoot: appRoot,
+      projectRoot,
       server,
       metro,
       eventTypes: ['add', 'delete', 'change'],
       async callback({ filePath, type }) {
+        if (!isRouteFile(filePath)) {
+          return;
+        }
+
         let shouldRegenerate = false;
+
         if (type === 'delete') {
           const route = filePathToRoute(filePath);
           staticRoutes.delete(route);
@@ -68,9 +136,11 @@ export async function setupTypedRoutes({
     });
   }
 
-  // Do we need to walk the entire tree on startup?
-  // Idea: Store the list of files in the last write, then simply check Git for what files have changed
-  await walk(appRoot, addFilePath);
+  if (await directoryExistsAsync(routerDirectory)) {
+    // Do we need to walk the entire tree on startup?
+    // Idea: Store the list of files in the last write, then simply check Git for what files have changed
+    await walk(routerDirectory, addFilePath);
+  }
 
   regenerateRouterDotTS(
     typesDirectory,
@@ -85,13 +155,14 @@ export async function setupTypedRoutes({
  * Should be debounced as its very common for developers to make changes to multiple files at once (eg Save All)
  */
 const regenerateRouterDotTS = debounce(
-  (
+  async (
     typesDir: string,
     staticRoutes: Set<string>,
     dynamicRoutes: Set<string>,
     dynamicRouteTemplates: Set<string>
   ) => {
-    fs.writeFile(
+    await fs.mkdir(typesDir, { recursive: true });
+    await fs.writeFile(
       path.resolve(typesDir, './router.d.ts'),
       getTemplateString(staticRoutes, dynamicRoutes, dynamicRouteTemplates)
     );
@@ -119,7 +190,7 @@ export function getTemplateString(
  *
  * These are extracted for easier testing
  */
-export function getTypedRoutesUtils(appRoot: string) {
+export function getTypedRoutesUtils(appRoot: string, filePathSeperator = path.sep) {
   /*
    * staticRoutes are a map where the key if the route without groups and the value
    *   is another set of all group versions of the route. e.g,
@@ -140,15 +211,31 @@ export function getTypedRoutesUtils(appRoot: string) {
    */
   const dynamicRoutes = new Map<string, Set<string>>();
 
+  function normalizedFilePath(filePath: string) {
+    return filePath.replaceAll(filePathSeperator, '/');
+  }
+
+  const normalizedAppRoot = normalizedFilePath(appRoot);
+
   const filePathToRoute = (filePath: string) => {
-    return filePath
-      .replace(appRoot, '')
-      .replace(/index.[jt]sx?/, '')
+    return normalizedFilePath(filePath)
+      .replace(normalizedAppRoot, '')
+      .replace(/index\.[jt]sx?/, '')
       .replace(/\.[jt]sx?$/, '');
   };
 
+  const isRouteFile = (filePath: string) => {
+    if (filePath.match(TYPED_ROUTES_EXCLUSION_REGEX)) {
+      return false;
+    }
+
+    // Route files must be nested with in the appRoot
+    const relative = path.relative(appRoot, filePath);
+    return relative && !relative.startsWith('..') && !path.isAbsolute(relative);
+  };
+
   const addFilePath = (filePath: string): boolean => {
-    if (filePath.match(/_layout\.[tj]sx?$/)) {
+    if (!isRouteFile(filePath)) {
       return false;
     }
 
@@ -214,6 +301,7 @@ export function getTypedRoutesUtils(appRoot: string) {
     dynamicRoutes,
     filePathToRoute,
     addFilePath,
+    isRouteFile,
   };
 }
 
@@ -232,7 +320,7 @@ async function walk(directory: string, callback: (filePath: string) => void) {
       await walk(p, callback);
     } else {
       // Normalise the paths so they are easier to convert to URLs
-      const normalizedPath = p.replaceAll(path.sep, '/').replaceAll(' ', '_');
+      const normalizedPath = p.replaceAll(path.sep, '/');
       callback(normalizedPath);
     }
   }
@@ -258,7 +346,7 @@ export function extrapolateGroupRoutes(
   const groupsMatch = match[0];
 
   for (const group of groupsMatch.matchAll(CAPTURE_GROUP_REGEX)) {
-    extrapolateGroupRoutes(route.replace(groupsMatch, `(${group[1]})`), routes);
+    extrapolateGroupRoutes(route.replace(groupsMatch, `(${group[1].trim()})`), routes);
   }
 
   return routes;
@@ -274,6 +362,7 @@ const routerDotTSTemplate = unsafeTemplate`/* eslint-disable @typescript-eslint/
 /* eslint-disable @typescript-eslint/ban-types */
 declare module "expo-router" {
   import type { LinkProps as OriginalLinkProps } from 'expo-router/build/link/Link';
+  import type { Router as OriginalRouter } from 'expo-router/build/types';
   export * from 'expo-router/build';
 
   // prettier-ignore
@@ -285,15 +374,18 @@ declare module "expo-router" {
 
   type RelativePathString = \`./\${string}\` | \`../\${string}\` | '..';
   type AbsoluteRoute = DynamicRouteTemplate | StaticRoutes;
-  type ExternalPathString = \`http\${string}\`;
+  type ExternalPathString = \`\${string}:\${string}\`;
+
   type ExpoRouterRoutes = DynamicRouteTemplate | StaticRoutes | RelativePathString;
-  type AllRoutes = ExpoRouterRoutes | ExternalPathString;
+  export type AllRoutes = ExpoRouterRoutes | ExternalPathString;
 
   /****************
    * Route Utils  *
    ****************/
 
   type SearchOrHash = \`?\${string}\` | \`#\${string}\`;
+  type UnknownInputParams = Record<string, string | number | (string | number)[]>;
+  type UnknownOutputParams = Record<string, string | string[]>;
 
   /**
    * Return only the RoutePart of a string. If the string has multiple parts return never
@@ -310,10 +402,14 @@ declare module "expo-router" {
   type SingleRoutePart<S extends string> = S extends \`\${string}/\${string}\`
     ? never
     : S extends \`\${string}\${SearchOrHash}\`
-    ? never
-    : S extends ''
-    ? never
-    : S;
+      ? never
+      : S extends ''
+        ? never
+        : S extends \`(\${string})\`
+          ? never
+          : S extends \`[\${string}]\`
+            ? never
+            : S;
 
   /**
    * Return only the CatchAll router part. If the string has search parameters or a hash return never
@@ -321,8 +417,12 @@ declare module "expo-router" {
   type CatchAllRoutePart<S extends string> = S extends \`\${string}\${SearchOrHash}\`
     ? never
     : S extends ''
-    ? never
-    : S;
+      ? never
+      : S extends \`\${string}(\${string})\${string}\`
+        ? never
+        : S extends \`\${string}[\${string}]\${string}\`
+          ? never
+          : S;
 
   // type OptionalCatchAllRoutePart<S extends string> = S extends \`\${string}\${SearchOrHash}\` ? never : S
 
@@ -354,29 +454,38 @@ declare module "expo-router" {
       ? [...RouteSegments<PartB>]
       : [PartA, ...RouteSegments<PartB>]
     : Path extends ''
-    ? []
-    : [Path];
+      ? []
+      : [Path];
 
   /**
-   * Returns a Record of the routes parameters as strings and CatchAll parameters as string[]
+   * Returns a Record of the routes parameters as strings and CatchAll parameters
+   *
+   * There are two versions, input and output, as you can input 'string | number' but
+   *  the output will always be 'string'
    *
    * /[id]/[...rest] -> { id: string, rest: string[] }
    * /no-params      -> {}
    */
-  type RouteParams<Path> = {
+  type InputRouteParams<Path> = {
+    [Key in ParameterNames<Path> as Key extends \`...\${infer Name}\`
+      ? Name
+      : Key]: Key extends \`...\${string}\` ? (string | number)[] : string | number;
+  } & UnknownInputParams;
+
+  type OutputRouteParams<Path> = {
     [Key in ParameterNames<Path> as Key extends \`...\${infer Name}\`
       ? Name
       : Key]: Key extends \`...\${string}\` ? string[] : string;
-  };
+  } & UnknownOutputParams;
 
   /**
-   * Returns the search parameters for a route
+   * Returns the search parameters for a route.
    */
   export type SearchParams<T extends AllRoutes> = T extends DynamicRouteTemplate
-    ? RouteParams<T>
+    ? OutputRouteParams<T>
     : T extends StaticRoutes
-    ? never
-    : Record<string, string>;
+      ? never
+      : UnknownOutputParams;
 
   /**
    * Route is mostly used as part of Href to ensure that a valid route is provided
@@ -391,75 +500,103 @@ declare module "expo-router" {
    *
    * This is named Route to prevent confusion, as users they will often see it in tooltips
    */
-  export type Route<T> = T extends DynamicRouteTemplate
-    ? never
-    :
-        | StaticRoutes
-        | RelativePathString
-        | ExternalPathString
-        | (T extends DynamicRoutes<infer _> ? T : never);
+  export type Route<T> = T extends string
+    ? T extends DynamicRouteTemplate
+      ? never
+      :
+          | StaticRoutes
+          | RelativePathString
+          | ExternalPathString
+          | (T extends \`\${infer P}\${SearchOrHash}\`
+              ? P extends DynamicRoutes<infer _>
+                ? T
+                : never
+              : T extends DynamicRoutes<infer _>
+                ? T
+                : never)
+    : never;
 
   /*********
    * Href  *
    *********/
 
-  export type Href<T extends string> = Route<T> | HrefObject<T>;
+  export type Href<T> = T extends Record<'pathname', string> ? HrefObject<T> : Route<T>;
 
-  export type HrefObject<T = AllRoutes> = T extends DynamicRouteTemplate
-    ? { pathname: T; params: RouteParams<T> }
-    : T extends Route<T>
-    ? { pathname: Route<T>; params?: never }
-    : never;
+  export type HrefObject<
+    R extends Record<'pathname', string>,
+    P = R['pathname'],
+  > = P extends DynamicRouteTemplate
+    ? { pathname: P; params: InputRouteParams<P> }
+    : P extends Route<P>
+      ? { pathname: Route<P> | DynamicRouteTemplate; params?: never | InputRouteParams<never> }
+      : never;
 
   /***********************
    * Expo Router Exports *
    ***********************/
 
-  export type Router = {
+  export type Router = Omit<OriginalRouter, 'push' | 'replace' | 'setParams'> & {
     /** Navigate to the provided href. */
-    push: <T extends string>(href: Href<T>) => void;
+    push: <T>(href: Href<T>) => void;
     /** Navigate to route without appending to the history. */
-    replace: <T extends string>(href: Href<T>) => void;
-    /** Go back in the history. */
-    back: () => void;
+    replace: <T>(href: Href<T>) => void;
     /** Update the current route query params. */
-    setParams: <T extends string = ''>(
-      params?: T extends '' ? Record<string, string> : RouteParams<T>
-    ) => void;
+    setParams: <T = ''>(params?: T extends '' ? Record<string, string> : InputRouteParams<T>) => void;
   };
+
+  /** The imperative router. */
+  export const router: Router;
 
   /************
    * <Link /> *
    ************/
-  export interface LinkProps<T extends string> extends OriginalLinkProps {
-    href: T extends DynamicRouteTemplate ? HrefObject<T> : Href<T>;
+  export interface LinkProps<T> extends OriginalLinkProps {
+    href: Href<T>;
   }
 
   export interface LinkComponent {
-    <T extends string>(props: React.PropsWithChildren<LinkProps<T>>): JSX.Element;
+    <T>(props: React.PropsWithChildren<LinkProps<T>>): JSX.Element;
     /** Helper method to resolve an Href object into a string. */
-    resolveHref: <T extends string>(href: Href<T>) => string;
+    resolveHref: <T>(href: Href<T>) => string;
   }
 
+  /**
+   * Component to render link to another route using a path.
+   * Uses an anchor tag on the web.
+   *
+   * @param props.href Absolute path to route (e.g. \`/feeds/hot\`).
+   * @param props.replace Should replace the current route without adding to the history.
+   * @param props.asChild Forward props to child component. Useful for custom buttons.
+   * @param props.children Child elements to render the content.
+   * @param props.className On web, this sets the HTML \`class\` directly. On native, this can be used with CSS interop tools like Nativewind.
+   */
   export const Link: LinkComponent;
+
+  /** Redirects to the href as soon as the component is mounted. */
+  export const Redirect: <T>(
+    props: React.PropsWithChildren<{ href: Href<T> }>
+  ) => JSX.Element;
 
   /************
    * Hooks *
    ************/
   export function useRouter(): Router;
+
   export function useLocalSearchParams<
-    T extends DynamicRouteTemplate | StaticRoutes | RelativePathString
-  >(): SearchParams<T>;
+    T extends AllRoutes | UnknownOutputParams = UnknownOutputParams,
+  >(): T extends AllRoutes ? SearchParams<T> : T;
+
+  /** @deprecated renamed to \`useGlobalSearchParams\` */
   export function useSearchParams<
-    T extends AllRoutes | SearchParams<DynamicRouteTemplate>
+    T extends AllRoutes | UnknownOutputParams = UnknownOutputParams,
   >(): T extends AllRoutes ? SearchParams<T> : T;
 
   export function useGlobalSearchParams<
-    T extends AllRoutes | SearchParams<DynamicRouteTemplate>
+    T extends AllRoutes | UnknownOutputParams = UnknownOutputParams,
   >(): T extends AllRoutes ? SearchParams<T> : T;
 
   export function useSegments<
-    T extends AbsoluteRoute | RouteSegments<AbsoluteRoute> | RelativePathString
+    T extends AbsoluteRoute | RouteSegments<AbsoluteRoute> | RelativePathString,
   >(): T extends AbsoluteRoute ? RouteSegments<T> : T extends string ? string[] : T;
 }
 `;

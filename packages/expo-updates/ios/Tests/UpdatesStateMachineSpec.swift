@@ -8,55 +8,97 @@ import ExpoModulesTestCore
 
 import EXManifests
 
-class TestStateChangeDelegate: UpdatesStateChangeDelegate {
-  var lastEventType: EXUpdates.UpdatesStateEventType?
-  var lastEventBody: [String: Any?]?
-  func sendUpdateStateChangeEventToBridge(_ eventType: EXUpdates.UpdatesStateEventType, body: [String: Any?]) {
-    lastEventType = eventType
-    lastEventBody = body
+class TestStateChangeEventManager: UpdatesEventManager {
+  var lastContext: UpdatesStateContext? = nil
+  weak var observer: (any EXUpdates.UpdatesEventManagerObserver)?
+
+  func sendStateMachineContextEvent(context: EXUpdates.UpdatesStateContext) {
+    lastContext = context
   }
 }
 
 class UpdatesStateMachineSpec: ExpoSpec {
-  override func spec() {
+  override class func spec() {
     describe("default state") {
       it("instantiates") {
-        let testStateChangeDelegate = TestStateChangeDelegate()
-        let machine = UpdatesStateMachine(changeEventDelegate: testStateChangeDelegate)
-        expect(machine.state) == .idle
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: Set(UpdatesStateValue.allCases))
+        expect(machine.getStateForTesting()) == .idle
+      }
+
+      it("sequence numbers") {
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: Set(UpdatesStateValue.allCases))
+        expect(machine.getStateForTesting()) == .idle
+
+        expect(machine.context.sequenceNumber) == 0
+
+        machine.processEventForTesting(.startStartup)
+        machine.processEventForTesting(.check)
+        machine.processEventForTesting(.checkCompleteUnavailable)
+        machine.processEventForTesting(.endStartup)
+
+        expect(machine.context.sequenceNumber) == 4
+      }
+
+      it("restart") {
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: Set(UpdatesStateValue.allCases))
+        expect(machine.getStateForTesting()) == .idle
+
+        expect(machine.context.isRestarting) == false
+        machine.processEventForTesting(.restart)
+        expect(machine.context.isRestarting) == true
+        expect(machine.context.sequenceNumber) == 1
+
+        machine.resetAndIncrementRestartCountForTesting()
+        expect(machine.context.restartCount) == 1
+        expect(machine.context.isRestarting) == false
+        expect(machine.context.sequenceNumber) == 2
+      }
+
+      it("should handle startStartup and endStartup") {
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: Set(UpdatesStateValue.allCases))
+
+        machine.processEventForTesting(.startStartup)
+        expect(machine.getStateForTesting()) == .idle
+        expect(testStateChangeEventManager.lastContext?.isStartupProcedureRunning) == true
+
+        machine.processEventForTesting(.endStartup)
+        expect(machine.getStateForTesting()) == .idle
+        expect(testStateChangeEventManager.lastContext?.isStartupProcedureRunning) == false
       }
 
       it("should handle check and checkCompleteAvailable") {
-        let testStateChangeDelegate = TestStateChangeDelegate()
-        let machine = UpdatesStateMachine(changeEventDelegate: testStateChangeDelegate)
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: Set(UpdatesStateValue.allCases))
 
-        machine.processEvent(UpdatesStateEventCheck())
-        expect(machine.state) == .checking
-        expect(testStateChangeDelegate.lastEventType) == .check
+        machine.processEventForTesting(.check)
+        expect(machine.getStateForTesting()) == .checking
+        expect(testStateChangeEventManager.lastContext?.isChecking) == true
 
-        machine.processEvent(UpdatesStateEventCheckCompleteWithUpdate(manifest: [
-          "updateId": "0000-xxxx"
-        ]))
-        expect(machine.state) == .idle
+        machine.processEventForTesting(.checkCompleteWithUpdate(manifest: ["updateId": "0000-xxxx"]))
+        expect(machine.getStateForTesting()) == .idle
         expect(machine.context.isChecking) == false
         expect(machine.context.checkError).to(beNil())
         expect(machine.context.latestManifest?["updateId"] as? String ?? "") == "0000-xxxx"
         expect(machine.context.isUpdateAvailable) == true
         expect(machine.context.isUpdatePending) == false
-        expect(testStateChangeDelegate.lastEventType) == .checkCompleteAvailable
-        let values = testStateChangeDelegate.lastEventBody?["context"] as? [String: Any] ?? [:]
-        expect(values["isUpdateAvailable"] as? Bool ?? false) == true
+        expect(testStateChangeEventManager.lastContext?.isUpdateAvailable) == true
+        let values = testStateChangeEventManager.lastContext
+        expect(values?.isUpdateAvailable) == true
       }
 
       it("should handle check and checkCompleteUnavailable") {
-        let testStateChangeDelegate = TestStateChangeDelegate()
-        let machine = UpdatesStateMachine(changeEventDelegate: testStateChangeDelegate)
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: Set(UpdatesStateValue.allCases))
 
-        machine.processEvent(UpdatesStateEventCheck())
-        expect(machine.state) == .checking
+        machine.processEventForTesting(.check)
+        expect(machine.getStateForTesting()) == .checking
 
-        machine.processEvent(UpdatesStateEventCheckComplete())
-        expect(machine.state) == .idle
+        machine.processEventForTesting(.checkCompleteUnavailable)
+        expect(machine.getStateForTesting()) == .idle
         expect(machine.context.isChecking) == false
         expect(machine.context.checkError).to(beNil())
         expect(machine.context.latestManifest).to(beNil())
@@ -65,82 +107,87 @@ class UpdatesStateMachineSpec: ExpoSpec {
       }
 
       it("should handle download and downloadComplete") {
-        let testStateChangeDelegate = TestStateChangeDelegate()
-        let machine = UpdatesStateMachine(changeEventDelegate: testStateChangeDelegate)
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: Set(UpdatesStateValue.allCases))
 
-        machine.processEvent(UpdatesStateEventDownload())
-        expect(machine.state) == .downloading
+        machine.processEventForTesting(.download)
+        expect(machine.getStateForTesting()) == .downloading
 
-        machine.processEvent(UpdatesStateEventDownloadCompleteWithUpdate(manifest: [
-          "updateId": "0000-xxxx"
-        ]))
-        expect(machine.state) == .idle
+        machine.processEventForTesting(.downloadCompleteWithUpdate(manifest: ["updateId": "0000-xxxx"]))
+        expect(machine.getStateForTesting()) == .idle
         expect(machine.context.isChecking) == false
         expect(machine.context.downloadError).to(beNil())
         expect(machine.context.latestManifest?["updateId"] as? String ?? "") == "0000-xxxx"
         expect(machine.context.downloadedManifest?["updateId"] as? String ?? "") == "0000-xxxx"
         expect(machine.context.isUpdateAvailable) == true
         expect(machine.context.isUpdatePending) == true
-        expect(machine.context.isRollback) == false
+        expect(machine.context.rollback) == nil
       }
 
       it("should handle rollback") {
-        let testStateChangeDelegate = TestStateChangeDelegate()
-        let machine = UpdatesStateMachine(changeEventDelegate: testStateChangeDelegate)
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: Set(UpdatesStateValue.allCases))
+        let commitTime = Date()
+        machine.processEventForTesting(.check)
+        expect(machine.getStateForTesting()) == .checking
 
-        machine.processEvent(UpdatesStateEventCheck())
-        expect(machine.state) == .checking
-
-        machine.processEvent(UpdatesStateEventCheckCompleteWithRollback())
-        expect(machine.state) == .idle
+        machine.processEventForTesting(.checkCompleteWithRollback(rollbackCommitTime: commitTime))
+        expect(machine.getStateForTesting()) == .idle
         expect(machine.context.isChecking) == false
         expect(machine.context.checkError).to(beNil())
         expect(machine.context.latestManifest).to(beNil())
         expect(machine.context.isUpdateAvailable) == true
         expect(machine.context.isUpdatePending) == false
-        expect(machine.context.isRollback) == true
+        expect(machine.context.rollback?.commitTime) == commitTime
       }
 
       it("invalid transitions are handled as expected") {
-        let testStateChangeDelegate = TestStateChangeDelegate()
-        let machine = UpdatesStateMachine(changeEventDelegate: testStateChangeDelegate)
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: Set(UpdatesStateValue.allCases))
 
-        machine.processEvent(UpdatesStateEventCheck())
-        expect(machine.state) == .checking
+        machine.processEventForTesting(.check)
+        expect(machine.getStateForTesting()) == .checking
         // Reset the test delegate
-        testStateChangeDelegate.lastEventBody = nil
-        testStateChangeDelegate.lastEventType = nil
+        testStateChangeEventManager.lastContext = nil
 
         // In .checking state, download events should be ignored,
         // state should not change, context should not change,
         // no events should be sent to JS
-        machine.processEvent(UpdatesStateEventDownload())
+        expect(machine.processEventForTesting(.download)).to(throwAssertion())
 
-        expect(machine.state) == .checking
-        expect(testStateChangeDelegate.lastEventType).to(beNil())
-        expect(testStateChangeDelegate.lastEventBody).to(beNil())
+        expect(machine.getStateForTesting()) == .checking
+        expect(testStateChangeEventManager.lastContext).to(beNil())
 
-        machine.processEvent(UpdatesStateEventDownloadCompleteWithUpdate(manifest: [
-          "updateId": "0000-xxxx"
-        ]))
+        expect(
+          machine.processEventForTesting(.downloadCompleteWithUpdate(manifest: ["updateId": "0000-xxxx"]))
+        ).to(throwAssertion())
 
-        expect(machine.state) == .checking
+        expect(machine.getStateForTesting()) == .checking
         expect(machine.context.downloadedManifest).to(beNil())
 
-        machine.reset() // go back to .idle
+        machine.resetAndIncrementRestartCountForTesting() // go back to .idle
 
-        machine.processEvent(UpdatesStateEventRestart())
-        expect(machine.state) == .restarting
+        machine.processEventForTesting(.restart)
+        expect(machine.getStateForTesting()) == .restarting
 
         // If restarting, all events should be ignored
-        machine.processEvent(UpdatesStateEventCheck())
-        expect(machine.state) == .restarting
+        expect(machine.processEventForTesting(.check)).to(throwAssertion())
+        expect(machine.getStateForTesting()) == .restarting
 
-        machine.processEvent(UpdatesStateEventDownload())
-        expect(machine.state) == .restarting
+        expect(machine.processEventForTesting(.download)).to(throwAssertion())
+        expect(machine.getStateForTesting()) == .restarting
 
-        machine.processEvent(UpdatesStateEventDownloadComplete())
-        expect(machine.state) == .restarting
+        expect(machine.processEventForTesting(.downloadComplete)).to(throwAssertion())
+        expect(machine.getStateForTesting()) == .restarting
+      }
+
+      it("invalid state values are handled as expected") {
+        let testStateChangeEventManager = TestStateChangeEventManager()
+        let machine = UpdatesStateMachine(logger: UpdatesLogger(), eventManager: testStateChangeEventManager, validUpdatesStateValues: [UpdatesStateValue.idle])
+
+        expect(machine.processEventForTesting(.download)).to(throwAssertion())
+        expect(machine.getStateForTesting()) == .idle
+        expect(testStateChangeEventManager.lastContext).to(beNil())
       }
     }
   }
